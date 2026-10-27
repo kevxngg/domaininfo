@@ -7,8 +7,10 @@
 # ================================================================
 
 # The portable CLI is available without Bash-specific dependencies.
-if [[ "${1:-}" == "--portable" ]]; then
+if [[ "${1:-}" == "--portable" || "${1:-}" == "--mikrotik" ]]; then
+    _portable_mode="$1"
     shift
+    [[ "$_portable_mode" == "--mikrotik" ]] && set -- -m mikrotik "$@"
     _portable_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     for _python in python3 python; do
         if command -v "$_python" >/dev/null 2>&1; then
@@ -21,7 +23,7 @@ if (( BASH_VERSINFO[0] < 4 )); then
     echo 'Los módulos clásicos necesitan Bash 4+. Usa python3 domaininfo.py o Bash de Homebrew.' >&2
     exit 1
 fi
-VERSION="4.0.0"
+VERSION="4.1.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export SCRIPT_DIR VERSION
 
@@ -445,6 +447,7 @@ interactive_menu() {
         echo -e "  ${G}[4]${NC} Análisis completo        (todos los módulos)"
         echo -e "  ${G}[5]${NC} Auditoría web avanzada   (OWASP, XSS, SQLi, Auth)"
         echo -e "  ${G}[6]${NC} Auditoría ISP/Empresa    (equipo, CVEs, riesgo)"
+        echo -e "  ${G}[9]${NC} MikroTik RouterOS actual (avisos por versión, Python)"
         echo ""
         echo -e "  ${B}── RED LOCAL / WIFI ───────────────────────────────────${NC}"
         echo -e "  ${G}[7]${NC} Escaneo de red local     (hosts, gateway, IoT, WiFi)"
@@ -456,10 +459,30 @@ interactive_menu() {
         echo -e "  ${DIM}$(printf '─%.0s' {1..58})${NC}\n"
 
         local choice
-        printf "  ${W}${BOLD}Opción [0-8]: ${NC}"
+        printf "  ${W}${BOLD}Opción [0-9]: ${NC}"
         read -r choice || return 0
 
         case "$choice" in
+            9)
+                local routeros_target routeros_version routeros_python
+                printf '  Dominio o IP del MikroTik: '
+                read -r routeros_target || return 0
+                printf '  Versión RouterOS (ENTER para intentar detectarla): '
+                read -r routeros_version || return 0
+                routeros_python=""
+                for candidate in python3 python; do
+                    if command -v "$candidate" >/dev/null 2>&1; then routeros_python="$candidate"; break; fi
+                done
+                if [[ -z "$routeros_python" ]]; then
+                    warn "Instala Python 3.10+ para la auditoría moderna de RouterOS"
+                elif [[ -n "$routeros_version" ]]; then
+                    "$routeros_python" "$SCRIPT_DIR/domaininfo.py" -m mikrotik --routeros-version "$routeros_version" -- "$routeros_target"
+                else
+                    "$routeros_python" "$SCRIPT_DIR/domaininfo.py" -m mikrotik -- "$routeros_target"
+                fi
+                printf '  Presiona ENTER para volver al menú...'
+                read -r || return 0
+                ;;
             1|2|3|4|5|6)
                 local raw_input validated
                 printf "  ${W}${BOLD}Ingresa dominio o IP: ${NC}"
