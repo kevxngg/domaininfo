@@ -37,6 +37,8 @@ Escribe números y pulsa ENTER; **0 vuelve** al menú anterior. CTRL+C cancela l
 
 Las pantallas muestran **[0 / r] Regresar**. También puedes escribir `regresar` o `volver`; los cambios de preferencias se conservan al regresar. En MikroTik, cancelar la entrada vuelve a su submenú. En el inicio, `0` sale del programa y `r` permanece en el menú principal.
 
+Los resultados se presentan en español: comprobaciones terminadas, errores explicados y servicios que respondieron. **Ver resultados explicados** describe cada aviso de RouterOS y muestra el parche de la rama aplicable. **Ver datos JSON** conserva la información técnica completa como opción separada. Al salir no hay despedidas personalizadas; el nombre del autor aparece únicamente como crédito.
+
 En el asistente, una URL conserva protocolo y puerto; se revisa la raíz del sitio. Para HTTP se omite automáticamente TLS en los modos web/completo, salvo que vuelvas a activarlo desde los módulos. La CLI con objetivo conserva su salida JSON para automatización.
 
 ## Instalación
