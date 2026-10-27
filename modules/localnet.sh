@@ -2,7 +2,7 @@
 # ================================================================
 #  localnet.sh — Local Network Scanner (WiFi/LAN)
 #  Encuentra dispositivos, vulnerabilidades y vectores de ataque
-#  Autor: @kevxngg (Señor K)
+#  Autor: @kevxngg (Kevin)
 # ================================================================
 
 R='\033[0;31m'; G='\033[0;32m'; Y='\033[1;33m'; B='\033[0;34m'
@@ -443,7 +443,7 @@ localnet_summary() {
     mkdir -p "$log_dir"
     local lf="${log_dir}/localnet_$(date +%Y%m%d_%H%M%S).txt"
     {
-        echo "LocalNet Audit v3.2.0 — @kevxngg (Señor K)"
+        echo "LocalNet Audit v3.2.0 — @kevxngg (Kevin)"
         echo "Red: ${LN_NETWORK:-N/A} | Gateway: ${LN_GATEWAY:-N/A} | Hosts: ${#LN_HOSTS[@]}"
         echo "Riesgo: ${LN_RISK}/100 — $label | Fecha: $(date)"
         echo ""; echo "HALLAZGOS:"
