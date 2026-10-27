@@ -28,3 +28,4 @@ jobs:
         run: |
           bash -n domaininfo.sh install.sh
           for script in modules/*.sh; do bash -n "$script"; done
+      - run: bash tests/test_legacy.sh
