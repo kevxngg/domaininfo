@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ================================================================
 #  ports.sh — Escaneo de puertos
-#  DomainInfo v3.2.0 — @kevxngg (Señor K)
+#  DomainInfo v3.2.0 — @kevxngg (Kevin)
 # ================================================================
 # shellcheck disable=SC2034,SC1091
 
