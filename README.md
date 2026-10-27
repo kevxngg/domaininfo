@@ -1,8 +1,35 @@
-# DomainInfo 4.1
+# DomainInfo 4.2
 
 Diagnóstico de dominios e IPs para **Termux, Kali/Linux, macOS y Windows**, por [@kevxngg](https://github.com/kevxngg).
 
 El núcleo portable usa **Python 3.10+ y su biblioteca estándar**: no requiere pip, root, Bash, Nmap ni compiladores. Los módulos Bash de la versión 3 se conservan para auditorías avanzadas; sus requisitos y limitaciones son distintos.
+
+## Menú interactivo
+
+Abre el programa sin objetivo para usar el asistente:
+
+```bash
+domaininfo
+# O desde la carpeta del proyecto:
+python3 domaininfo.py
+bash domaininfo.sh
+```
+
+En Windows: `python domaininfo.py` o `.\domaininfo.cmd`. También puedes abrirlo explícitamente con `python3 domaininfo.py --interactive`.
+
+El menú permite elegir auditoría, introducir el objetivo, revisar opciones e iniciar. Incluye:
+
+- **MikroTik**: revisar un router en la red o comparar una versión sin conexión.
+- **Opciones por auditoría**: puertos, módulos, conexión HTTP/HTTPS y versión RouterOS.
+- **Progreso y resúmenes**: direcciones, servicios accesibles, certificado y avisos aplicables, sin mostrar JSON crudo por defecto.
+- **Varios objetivos**: cargar un archivo, revisar el número de objetivos válidos y elegir el modo.
+- **Mis reportes**: consultar resultados recientes y abrir su HTML en el navegador si está disponible.
+- **Preferencias y diagnóstico**: tiempo por conexión, concurrencia, formatos y carpeta de resultados.
+- **Auditorías clásicas**: acceso a los módulos Bash cuando el entorno tiene sus dependencias.
+
+Escribe números y pulsa ENTER; **0 vuelve** al menú anterior. CTRL+C cancela la acción actual. El programa regresa al inicio después del reporte y permite repetir auditorías. Las preferencias duran la sesión. El diseño adapta el ancho de las líneas a la terminal; los colores se desactivan con `NO_COLOR`, terminal básica o salida redirigida. No necesita librerías de interfaz adicionales.
+
+En el asistente, una URL conserva protocolo y puerto; se revisa la raíz del sitio. Para HTTP se omite automáticamente TLS en los modos web/completo, salvo que vuelvas a activarlo desde los módulos. La CLI con objetivo conserva su salida JSON para automatización.
 
 ## Instalación
 
@@ -108,7 +135,7 @@ El catálogo revisado el **26 de octubre de 2026** cubre seis avisos de septiemb
 
 No prueba contraseñas, no ejecuta exploits y no cambia la configuración. Un resultado `potentially_affected` corresponde a la versión informada; no confirma explotación. `not_in_affected_range` se refiere solamente a los seis avisos del catálogo y no significa que el equipo sea seguro. Sin versión, con datos contradictorios o con beta/rc solicita revisión manual. El código de salida indica si se completó el diagnóstico, no si hay avisos aplicables.
 
-Disponible en el menú Python, opción **5**; en el menú Bash clásico, opción **9**, y directamente mediante `bash domaininfo.sh --mikrotik ...`. Los reportes usan los mismos formatos JSON/TXT/HTML. Detalles, fuentes y límites en [docs/MIKROTIK.md](docs/MIKROTIK.md).
+Disponible en el menú nuevo, opción **5**; en el menú Bash clásico (`--legacy`), opción **9**, y directamente mediante `bash domaininfo.sh --mikrotik ...`. Los reportes usan los mismos formatos JSON/TXT/HTML. Detalles, fuentes y límites en [docs/MIKROTIK.md](docs/MIKROTIK.md).
 
 ### Límites de los resultados
 
@@ -122,6 +149,7 @@ Disponible en el menú Python, opción **5**; en el menú Bash clásico, opción
 
 ```bash
 bash install.sh --legacy
+bash domaininfo.sh --legacy                   # Menú clásico
 bash domaininfo.sh -m quick example.com
 bash domaininfo.sh -m full -j -t 15 example.com
 bash domaininfo.sh --portable --doctor
