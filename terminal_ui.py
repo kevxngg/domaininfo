@@ -100,6 +100,7 @@ class InteractiveApp:
                 self.color = False
         self.history = []
         self.last_target = ""
+        self.at_home = False
 
     @property
     def width(self):
@@ -179,6 +180,7 @@ class InteractiveApp:
                   else "NÚMERO + ENTER · 0 para salir", "90")
 
     def screen(self, title, subtitle="", home=False):
+        self.at_home = home
         if self.color:
             print("\033[2J\033[H", end="", file=self.out)
         print(file=self.out)
@@ -201,6 +203,7 @@ class InteractiveApp:
             rows.append((subtitle, "90"))
         if not home:
             self.panel("WORKSPACE", rows)
+            self.line("[0 / r] Regresar al menú anterior", "90")
         else:
             self.center(title, "1;37")
         self.line()
@@ -221,6 +224,11 @@ class InteractiveApp:
             value = self.read().strip()
             if not self.tty:
                 self.out.write("\n")
+            if value.lower() in ("r", "regresar", "volver"):
+                if self.at_home:
+                    self.line("Ya estás en el menú principal. Usa 0 para salir.", "90")
+                    continue
+                raise Back()
             if value == "0":
                 raise Back()
             if not value and default is not None:
@@ -244,7 +252,7 @@ class InteractiveApp:
         return self.ask(label, default, validate)
 
     def pause(self):
-        self.out.write("\n  ENTER para continuar...")
+        self.out.write("\n  [0 / r] Regresar · ENTER para continuar...")
         self.out.flush()
         self.read()
         if not self.tty:
@@ -324,18 +332,24 @@ class InteractiveApp:
 
     def wizard(self, mode):
         args = self.fresh_args(mode)
-        self.screen(MODE_LABELS[mode][0], "Paso 1 · Elige el objetivo. 0 para volver.")
         if mode == "mikrotik":
-            self.item("1", "Revisar un router en la red", "Servicios accesibles, banners y avisos por versión")
-            self.item("2", "Revisar solo una versión", "Sin conexión a routers ni servicios de Internet")
-            args.offline = self.choose({"1", "2"}, default="1") == "2"
-            if args.offline:
-                args.routeros_version = self.version(required=True)
-                targets = ["routeros-offline"]
-            else:
-                targets = [self.target(args)]
-                args.routeros_version = self.version()
+            while True:
+                self.screen(MODE_LABELS[mode][0], "Paso 1 · Elige el tipo de revisión.")
+                self.item("1", "Revisar un router en la red", "Servicios accesibles, banners y avisos por versión")
+                self.item("2", "Revisar solo una versión", "Sin conexión a routers ni servicios de Internet")
+                args.offline = self.choose({"1", "2"}, default="1") == "2"
+                try:
+                    if args.offline:
+                        args.routeros_version = self.version(required=True)
+                        targets = ["routeros-offline"]
+                    else:
+                        targets = [self.target(args)]
+                        args.routeros_version = self.version()
+                except Back:
+                    continue
+                break
         else:
+            self.screen(MODE_LABELS[mode][0], "Paso 1 · Elige el objetivo.")
             targets = [self.target(args)]
         self.review(Plan(args, targets))
 
@@ -448,9 +462,9 @@ class InteractiveApp:
                 self.item("7", "Elegir módulos")
                 if args.mode == "mikrotik":
                     self.item("8", f"Puerto SSH: {args.ssh_port}")
-            self.item("r", "Restablecer valores predeterminados")
+            self.item("d", "Restablecer valores predeterminados")
             self.item("0", "Guardar y volver")
-            keys = {"1", "2", "3", "4", "r"}
+            keys = {"1", "2", "3", "4", "d"}
             if local and not args.offline:
                 keys |= {"5", "6", "7"}
                 if args.mode == "mikrotik":
