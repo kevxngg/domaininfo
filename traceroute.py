@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 traceroute.py — Fallback de traceroute en Python
-Autor: @kevxngg (Señor K)
+Autor: @kevxngg (Kevin)
 Uso  : python3 traceroute.py <host> [max_hops]
 """
 
