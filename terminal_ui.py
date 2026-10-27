@@ -31,6 +31,19 @@ MODULE_LABELS = {"dns": "Resolución de direcciones", "rdap": "Registro RDAP",
                  "http": "Sitio y cabeceras HTTP", "tls": "Certificado TLS",
                  "ports": "Servicios TCP", "traceroute": "Ruta de red",
                  "mikrotik": "Auditoría RouterOS"}
+MODULE_HELP = {
+    "dns": "Direcciones IPv4/IPv6 que el sistema devuelve para el objetivo.",
+    "rdap": "Datos públicos del registro del dominio o del bloque de direcciones IP.",
+    "http": "Respuesta de la página y cabeceras que indican políticas de seguridad del sitio.",
+    "tls": "Protocolo cifrado negociado y certificado validado por Python.",
+    "ports": "Servicios TCP que respondieron desde este equipo durante la revisión.",
+    "traceroute": "Saltos de red informados por la herramienta de ruta del sistema.",
+    "mikrotik": "Comparación de la versión RouterOS con los avisos del catálogo fechado.",
+}
+ADVISORY_LABELS = {"potentially_affected": "REVISAR: versión incluida en el aviso",
+                   "not_in_affected_range": "Versión fuera del intervalo afectado",
+                   "unknown_version": "SIN EVALUAR: falta la versión",
+                   "manual_review": "SIN CONCLUSIÓN: revisar la versión manualmente"}
 ANSI = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))")
 
 # Original ASCII letterforms; no figlet executable, font downloads or pip needed.
@@ -150,7 +163,7 @@ class InteractiveApp:
             print("  " + row, file=self.out)
 
     def home(self):
-        self.screen("CENTRO DE CONTROL", home=True)
+        self.screen("MENÚ PRINCIPAL", home=True)
         audit = [(key, MODE_LABELS[mode][0],
                   {"quick": "DNS + registro del dominio", "web": "HTTP + cabeceras + TLS",
                    "ports": "Servicios TCP accesibles", "full": "Todos los módulos generales",
@@ -190,19 +203,18 @@ class InteractiveApp:
             gradient = ("1;96", "1;36", "36", "1;34", "34", "36")
             for index, row in enumerate(art):
                 self.line(row.ljust(size).center(self.width - 4), gradient[index % len(gradient)])
-            self.center("NETWORK INTELLIGENCE / ROUTEROS AUDIT" if self.width >= 60
-                        else "OSINT / ROUTEROS AUDIT", "90")
+            self.center("DOMINIOS / REDES / ROUTEROS", "90")
             system = "TERMUX" if os.environ.get("TERMUX_VERSION") else platform.system().upper()
             self.center(f"v{self.core.VERSION}  ·  Kevin / @kevxngg" +
                         (f"  ·  {system}" if self.width >= 60 else ""), "90")
             self.line()
         else:
-            self.line("DOMAININFO / " + self.core.VERSION + "                         Kevin", "1;36")
+            self.line("DOMAININFO / " + self.core.VERSION, "1;36")
         rows = [(title, "1;37")]
         if subtitle:
             rows.append((subtitle, "90"))
         if not home:
-            self.panel("WORKSPACE", rows)
+            self.panel("PANEL DE ANÁLISIS", rows)
             self.line("[0 / r] Regresar al menú anterior", "90")
         else:
             self.center(title, "1;37")
@@ -229,6 +241,8 @@ class InteractiveApp:
                     self.line("Ya estás en el menú principal. Usa 0 para salir.", "90")
                     continue
                 raise Back()
+            if value.isascii() and value.isdecimal():
+                value = value.lstrip("0") or "0"
             if value == "0":
                 raise Back()
             if not value and default is not None:
@@ -265,7 +279,7 @@ class InteractiveApp:
                 try:
                     choice = self.choose(set(MODE_KEYS) | {"6", "7", "8", "9", "a", "h"})
                 except Back:
-                    self.line("Hasta luego, Kevin.")
+                    self.line()
                     return 0
                 try:
                     if choice in MODE_KEYS:
@@ -574,11 +588,14 @@ class InteractiveApp:
     def summary(self, report):
         modules = report.get("modules", {})
         errors = sum(item.get("status") == "error" for item in modules.values())
-        self.line("Resultado: " + (f"{errors} módulo(s) con error" if errors else "diagnóstico completado"), "33" if errors else "32")
+        done = sum(item.get("status") == "ok" for item in modules.values())
+        skipped = sum(item.get("status") == "skipped" for item in modules.values())
+        self.panel("RESUMEN", [(f"Comprobaciones: {done} terminadas / {errors} con error / {skipped} omitidas",
+                                "33" if errors else "32")])
         for name, item in modules.items():
             label = MODULE_LABELS.get(name, name)
             if item.get("status") == "error":
-                self.line(f"{label}: {item.get('error', 'sin detalle')}", "33")
+                self.line(f"{label}: {self.explain_error(item.get('error', 'sin detalle'))}", "33")
                 continue
             if item.get("status") == "skipped":
                 self.line(f"{label}: omitido", "90")
@@ -610,9 +627,10 @@ class InteractiveApp:
         self.line("Catálogo revisado: " + str(data.get("catalog_reviewed", "sin fecha")), "90")
         groups = {state: [entry for entry in data.get("advisories", []) if entry.get("status") == state]
                   for state in ("potentially_affected", "not_in_affected_range", "unknown_version", "manual_review")}
-        self.line(f"Avisos: {len(groups['potentially_affected'])} potenciales · "
-                  f"{len(groups['not_in_affected_range'])} fuera de rango · "
-                  f"{len(groups['unknown_version']) + len(groups['manual_review'])} por revisar")
+        self.line(f"Avisos que podrían afectar esta versión: {len(groups['potentially_affected'])}",
+                  "33" if groups['potentially_affected'] else "37")
+        self.line(f"Avisos que no incluyen esta versión: {len(groups['not_in_affected_range'])}")
+        self.line(f"Avisos sin evaluar: {len(groups['unknown_version']) + len(groups['manual_review'])}")
         for entry in groups["potentially_affected"]:
             self.line(f"[REVISAR] {entry['id']} · {entry.get('component', '')}", "33")
         if data.get("version_conflict"):
@@ -623,34 +641,110 @@ class InteractiveApp:
             self.line("Siguiente paso: revisa los parches de tu rama y restringe los servicios de gestión.", "33")
         self.line("La comparación de versión no confirma explotación ni certifica que el router sea seguro.", "90")
 
+    @staticmethod
+    def explain_error(error):
+        text = str(error)
+        lower = text.lower()
+        if any(word in lower for word in ("certificate_verify_failed", "certificate verify failed", "certificate failed")):
+            return "No se pudo validar el certificado. Revisa su confianza, nombre y fecha."
+        if any(word in lower for word in ("getaddrinfo", "name or service", "name resolution", "nodename nor servname")):
+            return "No se pudo resolver el nombre. Revisa el objetivo y la conexión DNS."
+        if "timed out" in lower or "timeout" in lower:
+            return "No respondió dentro del tiempo configurado. Puedes aumentar la espera."
+        if "connection refused" in lower or "actively refused" in lower:
+            return "El equipo rechazó la conexión al servicio."
+        return text
+
+    def details(self, report):
+        self.screen("Resultados explicados", str(report.get("meta", {}).get("target", "sin objetivo")))
+        for name, module in report.get("modules", {}).items():
+            self.panel(MODULE_LABELS.get(name, name).upper(),
+                       [(MODULE_HELP.get(name, "Datos de la comprobación."), "90")])
+            if module.get("status") == "skipped":
+                self.line("Estado: omitido en las opciones del análisis.")
+                continue
+            if module.get("status") == "error":
+                self.line("Estado: no se pudo completar.", "33")
+                self.line(self.explain_error(module.get("error", "sin detalle")))
+                self.line("Detalle del error: " + str(module.get("error", "sin detalle")), "90")
+                continue
+            data = module.get("data", {})
+            self.summary({"modules": {name: module}})
+            if name == "mikrotik":
+                for entry in data.get("advisories", []):
+                    self.line()
+                    self.line(str(entry.get("id", "Aviso")) + " / " + str(entry.get("component", "")), "1;37")
+                    self.line("Estado: " + ADVISORY_LABELS.get(entry.get("status"), "sin datos"))
+                    self.line("Qué revisa: " + str(entry.get("summary", "consulta la fuente")))
+                    if entry.get("status") == "potentially_affected" and data.get("version"):
+                        import routeros
+                        installed = routeros.parse_version(data["version"]).numbers
+                        fixes = [row["fixed"] for row in entry.get("affected_ranges", [])
+                                 if routeros.parse_version(row["introduced"]).numbers <= installed
+                                 < routeros.parse_version(row["fixed"]).numbers]
+                        if fixes:
+                            self.line("Versión que corrige este aviso en esa rama: " + ", ".join(fixes), "33")
+                    ports = entry.get("observed_default_ports", [])
+                    self.line("Puertos asociados que respondieron: " + (", ".join(map(str, ports)) if ports else "no se estableció exposición"))
+                    for source in entry.get("sources", []):
+                        self.line("Fuente: " + str(source), "90")
+            elif name == "ports":
+                for row in data.get("results", []):
+                    opened = row.get("state") == "open"
+                    self.line(f"{'[RESPONDE]' if opened else '[NO ACCESIBLE]'} {row.get('port')}/TCP",
+                              "32" if opened else "90")
+                self.line("No accesible: la conexión falló; puede estar cerrado, filtrado o no responder.")
+            elif name == "http":
+                explanations = {"content-security-policy": "limita los recursos que la página puede cargar",
+                                "strict-transport-security": "indica al navegador que use HTTPS",
+                                "x-content-type-options": "evita adivinar el tipo de contenido",
+                                "referrer-policy": "controla qué URL se comparte como referencia"}
+                for header in data.get("missing_headers", []):
+                    self.line(f"Ausente: {header} — {explanations.get(header, 'revisa la política del sitio')}")
+            elif name == "traceroute" and data.get("output"):
+                self.line(data["output"])
+            elif name == "rdap":
+                for key, label in (("handle", "Identificador"), ("name", "Nombre"),
+                                   ("country", "País del registro"), ("startAddress", "IP inicial"),
+                                   ("endAddress", "IP final")):
+                    if data.get(key):
+                        self.line(f"{label}: {data[key]}")
+            self.line()
+
     def viewer(self, entry):
         while True:
             report = entry["report"]
-            self.screen("Tu reporte", str(report.get("meta", {}).get("target", "sin objetivo")))
+            self.screen("Resumen del análisis", str(report.get("meta", {}).get("target", "sin objetivo")))
             try:
                 self.summary(report)
             except (TypeError, KeyError, AttributeError):
                 self.line("Este reporte no tiene un resumen compatible. Puedes consultar el detalle.", "33")
             self.line()
-            self.item("1", "Ver detalle completo")
+            self.item("1", "Ver resultados explicados")
             html_paths = [path for path in entry["paths"] if Path(path).suffix.lower() == ".html"]
             if html_paths:
                 self.item("2", "Abrir reporte HTML en el navegador")
             self.item("3", "Ver rutas de los archivos")
+            self.item("4", "Ver datos JSON (detalle técnico)")
             self.item("0", "Volver")
             try:
-                choice = self.choose({"1", "3"} | ({"2"} if html_paths else set()))
+                choice = self.choose({"1", "3", "4"} | ({"2"} if html_paths else set()))
             except Back:
                 return
             if choice == "1":
-                self.screen("Detalle del reporte")
-                self.line(json.dumps(report, ensure_ascii=False, indent=2))
+                try:
+                    self.details(report)
+                except (TypeError, KeyError, AttributeError, ValueError):
+                    self.line("No se pudo interpretar parte de este reporte. Consulta sus datos JSON.", "33")
             elif choice == "2":
                 try:
                     opened = webbrowser.open(Path(html_paths[0]).resolve().as_uri())
                     self.line("Reporte enviado al navegador." if opened else "No hay navegador disponible. Abre el archivo desde su ruta.")
                 except (OSError, webbrowser.Error) as exc:
                     self.line(f"No se pudo abrir el navegador: {exc}", "33")
+            elif choice == "4":
+                self.screen("Datos JSON", "Información técnica completa del análisis.")
+                self.line(json.dumps(report, ensure_ascii=False, indent=2))
             else:
                 if not entry["paths"]:
                     self.line("No se guardaron archivos; el resultado sigue disponible durante esta sesión.")
