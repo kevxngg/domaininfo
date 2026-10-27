@@ -1,6 +1,6 @@
 # 🌐 DomainInfo v3.2.0 — OSINT & Security Audit Suite
 
-> **Autor:** [@kevxngg](https://github.com/kevxngg) (Señor K)  
+> **Autor:** [@kevxngg](https://github.com/kevxngg) (Kevin)  
 > **Versión:** 3.2.0  
 > **Plataformas:** Linux · Kali · Parrot · macOS · Termux · Kali NetHunter
 
@@ -201,6 +201,6 @@ El autor no se responsabiliza por mal uso.
 
 <div align="center">
 
-**Hecho con ❤️ por [@kevxngg](https://github.com/kevxngg) · Señor K**
+**Hecho con ❤️ por [@kevxngg](https://github.com/kevxngg) · Kevin**
 
 </div>
