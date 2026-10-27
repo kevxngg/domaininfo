@@ -6,6 +6,12 @@ El núcleo portable usa **Python 3.10+ y su biblioteca estándar**: no requiere 
 
 ## Menú interactivo
 
+Logo ASCII propio, colores cian/azul, paneles de auditorías y herramientas y distribución adaptable: dos columnas en escritorio y paneles apilados en terminales estrechas. Las pantallas del asistente mantienen el mismo estilo de bordes y navegación.
+
+![Menú de DomainInfo en una terminal de escritorio](docs/assets/menu-desktop.png)
+
+Vista compacta: [menú para terminal estrecha](docs/assets/menu-mobile.png). Las imágenes se renderizaron a partir de la salida del menú; los colores y la fuente finales dependen de tu terminal.
+
 Abre el programa sin objetivo para usar el asistente:
 
 ```bash
