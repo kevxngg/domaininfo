@@ -30,5 +30,7 @@ done
 if [[ -n "$portable_python" ]]; then
     bash domaininfo.sh --mikrotik --offline --routeros-version 7.25 -q --format json |
         "$portable_python" -c 'import json,sys; d=json.load(sys.stdin)["modules"]["mikrotik"]["data"]; assert d["offline"] and d["version"] == "7.25"'
+    printf '0\n' | bash domaininfo.sh |
+        "$portable_python" -c 'import sys; text=sys.stdin.read(); assert "4.2.0" in text and "Kevin" in text'
 fi
 printf 'Classic offline regressions passed\n'
