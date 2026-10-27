@@ -1,6 +1,8 @@
-# Auditoría RouterOS 4.1
+# Auditoría RouterOS
 
 Autor: Kevin (@kevxngg). Revisión del catálogo: **2026-10-26**.
+
+Para usar el asistente de la versión 4.2, ejecuta `python3 domaininfo.py`, elige **5 · MikroTik / RouterOS**, y selecciona revisión de un equipo o revisión sin conexión. El asistente permite volver atrás, ajustar puertos y leer un resumen de los avisos antes de consultar el reporte completo.
 
 ## Fuentes y alcance
 
