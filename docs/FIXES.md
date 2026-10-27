@@ -1,5 +1,7 @@
 # Correcciones de la versión 4
 
+La versión 4.1 añade la auditoría portable de RouterOS por versión, con catálogo fechado y evidencias separadas de la aplicabilidad de un CVE. Ver [MIKROTIK.md](MIKROTIK.md).
+
 No se encontraron logs de la sesión antigua de Termux. Estas correcciones provienen de la revisión del código y de pruebas reproducibles; no prueban cuál fue el error exacto de aquella sesión.
 
 | Problema encontrado | Corrección |
