@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ================================================================
 #  webapp.sh — Web Application Vulnerability Scanner
-#  Autor: @kevxngg (Señor K)
+#  Autor: @kevxngg (Kevin)
 # ================================================================
 
 R='\033[0;31m'; G='\033[0;32m'; Y='\033[1;33m'; B='\033[0;34m'
@@ -460,7 +460,7 @@ webapp_summary() {
     local safe="${url//[^a-zA-Z0-9._-]/_}"
     local lf="${log_dir}/webapp_${safe:0:40}_$(date +%Y%m%d_%H%M%S).txt"
     {
-        echo "WebApp Audit v3.2.0 — @kevxngg (Señor K)"
+        echo "WebApp Audit v3.2.0 — @kevxngg (Kevin)"
         echo "URL: $url | Riesgo: ${WA_RISK}/100 — $label | Fecha: $(date)"
         echo ""; echo "HALLAZGOS:"
         for f in "${WA_FINDINGS[@]}"; do echo "  - $f"; done
