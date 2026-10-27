@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 report.py — HTML Report Generator for DomainInfo v3.2.0
-Autor: @kevxngg (Señor K)
+Autor: @kevxngg (Kevin)
 Uso: python3 report.py <log_file.txt> [output.html]
 """
 
@@ -62,7 +62,7 @@ TEMPLATE = """<!DOCTYPE html>
   </div>
   <div class="meta">
     <span>📅 {date}</span>
-    <span>👤 @kevxngg (Señor K)</span>
+    <span>👤 @kevxngg (Kevin)</span>
     <span>🔒 Uso autorizado únicamente</span>
   </div>
 </header>
@@ -70,7 +70,7 @@ TEMPLATE = """<!DOCTYPE html>
 {content}
 
 <footer>
-  <p>Generado por DomainInfo v{version} — @kevxngg (Señor K)</p>
+  <p>Generado por DomainInfo v{version} — @kevxngg (Kevin)</p>
   <p style="margin-top:4px;">Este reporte es confidencial. Uso exclusivo para auditorías autorizadas.</p>
 </footer>
 </div>
