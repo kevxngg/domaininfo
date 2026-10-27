@@ -22,7 +22,7 @@ import time
 from urllib import error, parse, request
 import uuid
 
-VERSION = "4.1.0"
+VERSION = "4.2.0"
 MODULES = ("dns", "rdap", "http", "tls", "ports", "traceroute", "mikrotik")
 MODES = {
     "quick": ("dns", "rdap"),
@@ -189,19 +189,25 @@ RUNNERS = {"dns": dns_info, "rdap": rdap_info, "http": http_info,
            "mikrotik": mikrotik_info}
 
 
-def scan(target, args):
+def scan(target, args, on_progress=None):
     report = {"meta": {"tool": "DomainInfo", "version": VERSION, "target": target,
                        "date": datetime.now(timezone.utc).isoformat(), "mode": args.mode,
                        "platform": platform.system()}, "modules": {}}
-    for name in MODES[args.mode]:
+    for index, name in enumerate(MODES[args.mode], 1):
         if name in args.skip:
             report["modules"][name] = {"status": "skipped"}
+            if on_progress:
+                on_progress(name, "skipped", index, len(MODES[args.mode]))
             continue
+        if on_progress:
+            on_progress(name, "running", index, len(MODES[args.mode]))
         try:
             data = RUNNERS[name](target, args)
             report["modules"][name] = {"status": "ok", "data": data}
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
             report["modules"][name] = {"status": "error", "error": str(exc)}
+        if on_progress:
+            on_progress(name, report["modules"][name]["status"], index, len(MODES[args.mode]))
         if not args.quiet:
             print(f"[{name}] {report['modules'][name]['status']}", file=sys.stderr)
     return report
@@ -284,6 +290,7 @@ def parser():
     cli.add_argument("target", nargs="?", help="Dominio, IPv4, IPv6 o URL HTTP/HTTPS")
     cli.add_argument("--version", action="version", version=VERSION)
     cli.add_argument("--doctor", action="store_true", help="Diagnóstico local, sin escaneos")
+    cli.add_argument("--interactive", action="store_true", help="Abrir el menú guiado")
     cli.add_argument("-m", "--mode", choices=MODES, default="quick")
     cli.add_argument("-f", "--file", type=Path, help="Objetivos UTF-8, uno por línea")
     cli.add_argument("-t", "--threads", type=bounded_int(1, 64), default=15)
@@ -325,6 +332,11 @@ def main(argv=None):
                 cli.error(str(exc))
     if args.target and args.file:
         cli.error("Usa un objetivo o --file, no ambos")
+    if args.interactive and (args.target or args.file or args.offline):
+        cli.error("--interactive no acepta objetivo, --file ni --offline; elige dentro del menú")
+    if args.interactive or (not args.target and not args.file and not args.offline and sys.stdin.isatty()):
+        from terminal_ui import InteractiveApp
+        return InteractiveApp(sys.modules[__name__], args).run()
     raw_targets = []
     if args.offline:
         raw_targets = ["routeros-offline"]
@@ -335,23 +347,6 @@ def main(argv=None):
             cli.error(str(exc))
     elif args.target:
         raw_targets = [args.target]
-    elif sys.stdin.isatty():
-        print("DomainInfo " + VERSION + " | 1 Rápido  2 Web  3 Puertos  4 Completo  5 MikroTik  0 Salir")
-        choice = input("Opción [1]: ").strip() or "1"
-        if choice == "0":
-            return 0
-        if choice not in ("1", "2", "3", "4", "5"):
-            cli.error("Opción inválida")
-        args.mode = {"1": "quick", "2": "web", "3": "ports", "4": "full", "5": "mikrotik"}[choice]
-        raw_targets = [input("Dominio o IP: ")]
-        if args.mode == "mikrotik" and not args.routeros_version:
-            declared = input("Versión RouterOS (ENTER para intentar detectarla): ").strip()
-            if declared:
-                import routeros
-                try:
-                    args.routeros_version = routeros.parse_version(declared).text
-                except ValueError as exc:
-                    cli.error(str(exc))
     else:
         cli.error("Indica un objetivo, --file o --doctor")
     targets = []
