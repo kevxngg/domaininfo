@@ -1,0 +1,57 @@
+# DomainInfo — .gitignore
+# @kevxngg (Señor K)
+
+# ── Outputs generados por ejecuciones locales ──────────────────
+logs/
+output/
+!logs/.gitkeep
+
+# ── Reportes generados
+*.html
+*.json
+
+# ── Archivos temporales del sistema ───────────────────────────
+.DS_Store
+Thumbs.db
+.Spotlight-V100
+.Trashes
+
+# ── Termux / Android ──────────────────────────────────────────
+.termux/
+
+# ── Python ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.so
+pip-log.txt
+
+# ── IDEs ──────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# ── Archivos de objetivos personales (no subir al repo) ───────
+targets*.txt
+ips*.txt
+domains*.txt
+scope*.txt
+
+# ── Keys / credenciales / configs locales (NUNCA al repo) ─────
+*.key
+*.pem
+*.env
+.env.*
+config.local.*
+secrets.*
