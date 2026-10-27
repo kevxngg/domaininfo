@@ -22,4 +22,13 @@ QUIET=true; TARGET=127.0.0.1
 source ./modules/localnet.sh
 LN_NETWORK=''
 if localnet_discover >/dev/null; then exit 1; fi
+# The modern RouterOS route must work without loading classic network tools.
+portable_python=""
+for candidate in python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1; then portable_python="$candidate"; break; fi
+done
+if [[ -n "$portable_python" ]]; then
+    bash domaininfo.sh --mikrotik --offline --routeros-version 7.25 -q --format json |
+        "$portable_python" -c 'import json,sys; d=json.load(sys.stdin)["modules"]["mikrotik"]["data"]; assert d["offline"] and d["version"] == "7.25"'
+fi
 printf 'Classic offline regressions passed\n'
