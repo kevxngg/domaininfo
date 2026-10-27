@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ================================================================
 #  domaininfo.sh — Domain & IP Intelligence Tool v3.2.0
-#  Autor  : @kevxngg (Señor K)
+#  Autor  : @kevxngg (Kevin)
 #  GitHub : https://github.com/kevxngg/domaininfo
 #  Versión: 3.2.0  |  Licencia: MIT
 # ================================================================
@@ -80,7 +80,7 @@ _cleanup() {
     fi
     # Limpiar archivos temporales si existen
     [[ -n "${_TMPDIR_GLOBAL:-}" ]] && rm -rf "$_TMPDIR_GLOBAL" 2>/dev/null
-    echo -e "  ${DIM}Hasta luego, Señor K.${NC}"
+    echo -e "  ${DIM}Hasta luego, Kevin.${NC}"
     exit 130
 }
 trap '_cleanup' SIGINT SIGTERM
@@ -288,7 +288,7 @@ save_log() {
         echo "=========================================================="
         echo " DomainInfo v${VERSION} — Reporte: $TARGET"
         echo " Fecha  : $(date '+%Y-%m-%d %H:%M:%S') | Modo: $MODE"
-        echo " Auditor: @kevxngg (Señor K)"
+        echo " Auditor: @kevxngg (Kevin)"
         echo "=========================================================="
         echo "Dominio    : ${DOMAIN:-N/A}"
         echo "IP         : ${IP:-N/A}"
@@ -402,7 +402,7 @@ show_banner() {
     echo '  ██████╔╝╚██████╔╝██║ ╚═╝ ██║██║  ██║██║██║ ╚████║██║██║ ╚████║██║     ╚██████╔╝'
     echo '  ╚═════╝  ╚═════╝ ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝╚═╝╚═╝  ╚═══╝╚═╝      ╚═════╝'
     echo -e "${NC}"
-    echo -e "  ${W}${BOLD}Domain & IP Intelligence Suite${NC}   ${DIM}v${VERSION} — @kevxngg (Señor K)${NC}"
+    echo -e "  ${W}${BOLD}Domain & IP Intelligence Suite${NC}   ${DIM}v${VERSION} — @kevxngg (Kevin)${NC}"
     echo -e "  ${DIM}github.com/kevxngg/domaininfo${NC}"
     echo -e "  ${DIM}$(printf '═%.0s' {1..58})${NC}"
     echo ""
@@ -412,7 +412,7 @@ show_banner() {
 # AYUDA
 # ════════════════════════════════════════════════════════════════
 show_help() {
-    echo -e "${W}${BOLD}DomainInfo v${VERSION}${NC} — @kevxngg (Señor K)"
+    echo -e "${W}${BOLD}DomainInfo v${VERSION}${NC} — @kevxngg (Kevin)"
     echo -e "\n${W}${BOLD}USO:${NC}  domaininfo [opciones] <dominio|IP>"
     echo -e "\n${W}${BOLD}OPCIONES:${NC}"
     echo -e "  ${G}-f <archivo>${NC}   Batch: múltiples objetivos (uno por línea)"
@@ -563,7 +563,7 @@ interactive_menu() {
                 ;;
 
             0)
-                echo -e "\n  ${DIM}Hasta luego, Señor K.${NC}\n"
+                echo -e "\n  ${DIM}Hasta luego, Kevin.${NC}\n"
                 exit 0
                 ;;
 
