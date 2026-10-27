@@ -8,6 +8,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 import json
 import os
+import platform
 from pathlib import Path
 import re
 import shutil
@@ -31,6 +32,33 @@ MODULE_LABELS = {"dns": "Resolución de direcciones", "rdap": "Registro RDAP",
                  "ports": "Servicios TCP", "traceroute": "Ruta de red",
                  "mikrotik": "Auditoría RouterOS"}
 ANSI = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))")
+
+# Original ASCII letterforms; no figlet executable, font downloads or pip needed.
+LOGO_FONT = {
+    "D": (" ____  ", "|  _ \\ ", "| | | |", "| |_| |", "|____/ "),
+    "o": ("       ", "  ___  ", " / _ \\ ", "| (_) |", " \\___/ "),
+    "m": ("            ", " _ __ ___   ", "| '_ ` _ \\  ", "| | | | | | ", "|_| |_| |_| "),
+    "a": ("       ", "  __ _ ", " / _` |", "| (_| |", " \\__,_|"),
+    "i": (" _ ", "(_)", "| |", "| |", "|_|"),
+    "n": ("       ", " _ __  ", "| '_ \\ ", "| | | |", "|_| |_|"),
+    "I": (" ___ ", "|_ _|", " | | ", " | | ", "|___|"),
+    "f": ("  __ ", " / _|", "| |_ ", "|  _|", "|_|  "),
+}
+MINI_FONT = {
+    "D": (" _ ", "| \\", "|_/"), "O": (" _ ", "/ \\", "\\_/"),
+    "M": ("   ", "|V|", "| |"), "A": (" _ ", "/_\\", "| |"),
+    "I": ("_", "|", "_"), "N": ("   ", "|\\|", "| |"),
+    "F": (" _ ", "|_ ", "|  "),
+}
+
+
+def logo_lines(available):
+    large = ["".join(LOGO_FONT[letter][row] for letter in "DomainInfo").rstrip() for row in range(5)]
+    if max(map(len, large)) <= available:
+        return large
+    words = ("DOMAININFO",) if available >= 35 else ("DOMAIN", "INFO")
+    return [" ".join(MINI_FONT[letter][row] for letter in word).rstrip()
+            for word in words for row in range(3)]
 
 
 def safe_text(value):
@@ -86,29 +114,109 @@ class InteractiveApp:
             for wrapped in textwrap.wrap(part, self.width - 4, replace_whitespace=False) or [""]:
                 print("  " + (self.style(wrapped, color) if color else wrapped), file=self.out)
 
-    def screen(self, title, subtitle=""):
+    def center(self, text, color="90"):
+        text = safe_text(text)
+        self.line(text.center(self.width - 4), color)
+
+    def frame(self, title, rows, width=None, accent="36", descriptions=True):
+        """Return styled lines of a panel; geometry never counts ANSI bytes."""
+        width = width or self.width - 4
+        inner = width - 4
+        heading = (" " + safe_text(title) + " ")[:width - 4]
+        result = [self.style("╭─" + heading + "─" * (width - 3 - len(heading)) + "╮", accent)]
+        for row in rows:
+            if len(row) == 2:
+                text, color = row
+                chunks = textwrap.wrap(safe_text(text), inner) or [""]
+                for chunk in chunks:
+                    result.append(self.style("│ ", accent) + self.style(chunk.ljust(inner), color)
+                                  + self.style(" │", accent))
+            else:
+                key, label, description = row
+                text = f"[{key}] {label}"
+                for chunk in textwrap.wrap(safe_text(text), inner) or [""]:
+                    result.append(self.style("│ ", accent) + self.style(chunk.ljust(inner), "1;37")
+                                  + self.style(" │", accent))
+                if descriptions and description:
+                    for chunk in textwrap.wrap(safe_text(description), inner - 4):
+                        result.append(self.style("│ ", accent) + self.style(("    " + chunk).ljust(inner), "90")
+                                      + self.style(" │", accent))
+        result.append(self.style("╰" + "─" * (width - 2) + "╯", accent))
+        return result
+
+    def panel(self, title, rows, accent="36"):
+        for row in self.frame(title, rows, accent=accent):
+            print("  " + row, file=self.out)
+
+    def home(self):
+        self.screen("CENTRO DE CONTROL", home=True)
+        audit = [(key, MODE_LABELS[mode][0],
+                  {"quick": "DNS + registro del dominio", "web": "HTTP + cabeceras + TLS",
+                   "ports": "Servicios TCP accesibles", "full": "Todos los módulos generales",
+                   "mikrotik": "Router en red o versión offline"}[mode])
+                 for key, mode in MODE_KEYS.items()]
+        workspace = [("6", "Varios objetivos", "Auditoría desde un archivo"),
+                     ("7", "Mis reportes", "Resultados y exportaciones"),
+                     ("8", "Preferencias", "Conexiones, tiempos y formatos"),
+                     ("9", "Diagnóstico del equipo", "Estado de las herramientas"),
+                     ("a", "Auditorías clásicas", "ISP / WebApp / LAN con Bash")]
+        if self.width >= 78:
+            panel_width = (self.width - 6) // 2
+            detailed = shutil.get_terminal_size((80, 24)).lines >= 34
+            left = self.frame("01 / AUDITORÍAS", audit, panel_width, "36", detailed)
+            right = self.frame("02 / HERRAMIENTAS", workspace, panel_width, "35", detailed)
+            blank = " " * panel_width
+            for index in range(max(len(left), len(right))):
+                print("  " + (left[index] if index < len(left) else blank) + "  "
+                      + (right[index] if index < len(right) else blank), file=self.out)
+        else:
+            for title, rows, accent in (("AUDITORÍAS", audit, "36"), ("HERRAMIENTAS", workspace, "35")):
+                for row in self.frame(title, rows, accent=accent, descriptions=False):
+                    print("  " + row, file=self.out)
+        self.line()
+        self.panel("NAVEGACIÓN", [("[h] Ayuda rápida     [0] Salir", "90")], "90")
+        self.line("Elige un módulo para comenzar. NÚMERO + ENTER" if self.width >= 60
+                  else "NÚMERO + ENTER · 0 para salir", "90")
+
+    def screen(self, title, subtitle="", home=False):
         if self.color:
             print("\033[2J\033[H", end="", file=self.out)
         print(file=self.out)
-        self.line("DOMAININFO  " + self.core.VERSION + "  /  Kevin", "1;36")
-        self.line("─" * (self.width - 4), "90")
-        self.line(title, "1;37")
+        if home:
+            art = logo_lines(self.width - 4)
+            size = max(map(len, art))
+            gradient = ("1;96", "1;36", "36", "1;34", "34", "36")
+            for index, row in enumerate(art):
+                self.line(row.ljust(size).center(self.width - 4), gradient[index % len(gradient)])
+            self.center("NETWORK INTELLIGENCE / ROUTEROS AUDIT" if self.width >= 60
+                        else "OSINT / ROUTEROS AUDIT", "90")
+            system = "TERMUX" if os.environ.get("TERMUX_VERSION") else platform.system().upper()
+            self.center(f"v{self.core.VERSION}  ·  Kevin / @kevxngg" +
+                        (f"  ·  {system}" if self.width >= 60 else ""), "90")
+            self.line()
+        else:
+            self.line("DOMAININFO / " + self.core.VERSION + "                         Kevin", "1;36")
+        rows = [(title, "1;37")]
         if subtitle:
-            self.line(subtitle, "90")
+            rows.append((subtitle, "90"))
+        if not home:
+            self.panel("WORKSPACE", rows)
+        else:
+            self.center(title, "1;37")
         self.line()
 
     def item(self, key, label, description=""):
-        self.line(f"[{key}] {label}", "36")
+        self.line(f"  [{key}]  {label}", "1;36")
         if description:
             self.line("    " + description, "90")
 
     def ask(self, label, default=None, validator=None, allow_empty=False):
         suffix = f" [{safe_text(default)}]" if default not in (None, "") else ""
         while True:
-            parts = textwrap.wrap(safe_text(label) + suffix + ":", self.width - 4)
+            parts = textwrap.wrap("> " + safe_text(label) + suffix + ":", self.width - 4)
             for part in parts[:-1]:
                 self.line(part)
-            self.out.write("  " + parts[-1] + " ")
+            self.out.write("  " + self.style(parts[-1], "1;36") + " ")
             self.out.flush()
             value = self.read().strip()
             if not self.tty:
@@ -145,17 +253,7 @@ class InteractiveApp:
     def run(self):
         while True:
             try:
-                self.screen("¿Qué quieres revisar?", "Escribe un número y pulsa ENTER. 0 para salir.")
-                for key, mode in MODE_KEYS.items():
-                    self.item(key, *MODE_LABELS[mode])
-                self.line()
-                self.item("6", "Varios objetivos", "Cargar un archivo y elegir la auditoría")
-                self.item("7", "Mis reportes", "Resultados de esta sesión y reportes JSON guardados")
-                self.item("8", "Preferencias", "Tiempo de espera, conexiones y carpeta de reportes")
-                self.item("9", "Diagnóstico del equipo", "Comprobar Python y herramientas disponibles")
-                self.item("a", "Auditorías clásicas", "ISP, aplicaciones web y red local; requieren Bash")
-                self.item("h", "Cómo usar DomainInfo")
-                self.item("0", "Salir")
+                self.home()
                 try:
                     choice = self.choose(set(MODE_KEYS) | {"6", "7", "8", "9", "a", "h"})
                 except Back:
