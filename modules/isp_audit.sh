@@ -2,7 +2,7 @@
 # ================================================================
 #  isp_audit.sh — ISP / Network Device Auditor
 #  Detecta empresa, equipo, vulnerabilidades de cualquier IP pública
-#  Autor: @kevxngg (Señor K)
+#  Autor: @kevxngg (Kevin)
 # ================================================================
 
 R='\033[0;31m'; G='\033[0;32m'; Y='\033[1;33m'; B='\033[0;34m'
@@ -609,7 +609,7 @@ isp_summary() {
     mkdir -p "$log_dir"
     local lf="${log_dir}/isp_audit_${ip//[^0-9]/_}_$(date +%Y%m%d_%H%M%S).txt"
     {
-        echo "ISP Audit v3.2.0 — @kevxngg (Señor K)"
+        echo "ISP Audit v3.2.0 — @kevxngg (Kevin)"
         echo "IP: $ip | ISP: ${ISP_ORG:-N/A} | Equipo: ${ISP_DEVICE:-N/A}"
         echo "Riesgo: ${ISP_RISK}/100 — $label | Fecha: $(date)"
         echo ""; echo "HALLAZGOS:"
