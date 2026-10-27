@@ -1,206 +1,121 @@
-# 🌐 DomainInfo v3.2.0 — OSINT & Security Audit Suite
+# DomainInfo 4
 
-> **Autor:** [@kevxngg](https://github.com/kevxngg) (Señor K)  
-> **Versión:** 3.2.0  
-> **Plataformas:** Linux · Kali · Parrot · macOS · Termux · Kali NetHunter
+Diagnóstico de dominios e IPs para **Termux, Kali/Linux, macOS y Windows**, por [@kevxngg](https://github.com/kevxngg).
 
-Suite completa de inteligencia OSINT y auditoría de seguridad. Cubre dominios, IPs públicas, empresas ISP/telecomunicaciones, aplicaciones web y redes locales WiFi.
+El núcleo portable usa **Python 3.10+ y su biblioteca estándar**: no requiere pip, root, Bash, Nmap ni compiladores. Los módulos Bash de la versión 3 se conservan para auditorías avanzadas; sus requisitos y limitaciones son distintos.
 
----
+## Instalación
 
-## 🚀 Instalación
+### Termux
+
+```bash
+pkg update
+pkg install git python
+cd "$HOME"
+git clone https://github.com/kevxngg/domaininfo.git
+cd domaininfo
+bash install.sh
+domaininfo --doctor
+domaininfo example.com
+```
+
+Trabaja dentro de `$HOME`, en vez del almacenamiento compartido de Android. El instalador utiliza `$PREFIX/bin`, no `/usr/bin`, no ejecuta sudo y no actualiza pip. Si falla `pkg`, revisa el error visible, la conexión y los repositorios con `termux-change-repo`. Consulta la [guía oficial de paquetes de Termux](https://github.com/termux/termux-packages/wiki/Package-Management).
+
+### Kali y otras distribuciones Linux
 
 ```bash
 git clone https://github.com/kevxngg/domaininfo.git
-cd domaininfo && bash install.sh
+cd domaininfo
+bash install.sh
+python3 domaininfo.py --doctor
+python3 domaininfo.py example.com
 ```
 
-### Termux / Kali NetHunter (Android)
+El instalador detecta apt, dnf o pacman si falta Python. El comando `domaininfo` se guarda en `~/.local/bin`; añade esa carpeta a PATH si hace falta. No ejecutes toda la aplicación con sudo.
+
+### macOS
+
+Instala Python 3.10+ (por ejemplo, `brew install python` si ya utilizas Homebrew), clona el repositorio y ejecuta:
+
 ```bash
-pkg update && pkg install git
+bash install.sh
+python3 domaininfo.py example.com
+```
+
+El núcleo portable no depende del Bash 3.2 del sistema ni de herramientas GNU.
+
+### Windows (PowerShell o CMD)
+
+Instala Python 3.10+ con su opción de PATH y Git. Abre una terminal nueva:
+
+```powershell
 git clone https://github.com/kevxngg/domaininfo.git
-cd domaininfo && bash install.sh
+cd domaininfo
+python domaininfo.py --doctor
+.\domaininfo.cmd example.com
 ```
 
----
+También puedes usar `py -3 domaininfo.py example.com`. El instalador opcional `install.ps1` solo verifica Python y el diagnóstico. Si PowerShell bloquea scripts, utiliza directamente `python domaininfo.py`; no necesitas cambiar la política del equipo.
 
-## 📖 Uso
+## Funciones portables
+
+| Modo | Funciones |
+|---|---|
+| `quick` (predeterminado) | Resolución IPv4/IPv6 y registro RDAP |
+| `web` | DNS, HTTP, headers y certificado TLS verificado |
+| `ports` | DNS y conexiones TCP concurrentes, sin sockets RAW |
+| `full` | Todos los anteriores y traceroute del sistema, si está disponible |
+
+Incluye dominios internacionales (IDNA), archivos batch UTF-8 con BOM/CRLF, eliminación de duplicados, errores por módulo, reportes JSON/TXT/HTML, escritura atómica y nombres únicos. El TXT contiene el mismo documento estructurado que el JSON. Los reportes HTML escapan el contenido remoto.
 
 ```bash
-# Menú interactivo (recomendado — vuelve al menú al terminar)
-bash domaininfo.sh
-domaininfo
-
-# CLI directo
-domaininfo google.com
-domaininfo -m quick 8.8.8.8
-domaininfo -m full -j -t 20 example.com
-domaininfo -f targets.txt -q
-
-# Módulos especializados directos
-bash modules/isp_audit.sh  181.78.19.203   # Auditoría ISP
-bash modules/localnet.sh                    # Red local WiFi
-bash modules/webapp.sh     example.com      # Web app OWASP
+python3 domaininfo.py                          # Menú interactivo
+python3 domaininfo.py example.com
+python3 domaininfo.py -m web example.com
+python3 domaininfo.py -m ports --ports 22,80,443 --timeout 2 -t 8 127.0.0.1
+python3 domaininfo.py -m quick -s rdap ::1
+python3 domaininfo.py -f targets.txt -m web -o logs --format all
+python3 domaininfo.py -m full -s ports -s traceroute example.com
+python3 domaininfo.py -q -s rdap localhost      # Solo JSON en stdout
+python3 domaininfo.py --doctor                 # Diagnóstico local sin red
+python3 domaininfo.py --help
 ```
 
-### Flags CLI
+En Windows sustituye `python3` por `python` o `py -3`.
 
-| Flag | Descripción |
-|------|-------------|
-| `-m <modo>` | `full` \| `quick` \| `ports` \| `web` |
-| `-t <n>` | Hilos para subdomain scan (default: 15) |
-| `-f <archivo>` | Batch: un objetivo por línea |
-| `-s <módulo>` | Saltar módulo (ej: `-s traceroute`) |
-| `-j` | Exportar resultados a JSON |
-| `-q` | Modo silencioso (solo resultados) |
-| `-v` | Verbose (debug de módulos) |
-| `-h` | Ayuda |
+`-t` limita conexiones TCP a 1–64 trabajadores. `--timeout` limita cada operación de conexión/lectura, entre 0.1 y 60 segundos; la resolución DNS del sistema y las redirecciones no tienen un límite global. `-s` puede repetirse. `--scheme http --web-port 8080` permite inspeccionar un servidor local. Una URL se normaliza a su host; configura protocolo y puerto con estas opciones, ya que la ruta y puerto de la URL no se conservan.
 
----
+Los resultados salen como un documento JSON por objetivo. Código de salida: `0` sin errores, `1` si hay objetivos inválidos, módulos fallidos o error al guardar, `2` para argumentos inválidos y `130` al interrumpir. Un módulo omitido o traceroute no disponible no invalida los demás resultados.
 
-## 🗂️ Módulos — Menú Principal
+### Límites de los resultados
 
-| Opción | Módulo | Descripción |
-|--------|--------|-------------|
-| **1** | Análisis rápido | DNS + Geo + WHOIS |
-| **2** | Análisis de puertos | DNS + Geo + Nmap detallado |
-| **3** | Análisis web | HTTP + WAF + SSL/TLS + Tech Stack |
-| **4** | Análisis completo | Todos los módulos (12 en total) |
-| **5** | Auditoría web OWASP | XSS, SQLi, Auth, Headers, Info Leak |
-| **6** | Auditoría ISP/Empresa | Empresa, equipo, CVEs, puertos, riesgo |
-| **7** | Red local / WiFi | Hosts, gateway, IoT, vectores WiFi |
-| **8** | Batch | Múltiples objetivos desde archivo |
+- DNS portable consulta A/AAAA mediante el resolver del sistema. Los registros MX/TXT/NS y los módulos especializados siguen disponibles en Bash.
+- RDAP envía el objetivo a `rdap.org` y al registro al que redirige. Requiere Internet y puede fallar por límites del servicio. Usa `-s rdap` para omitirlo.
+- HTTP/TLS verifica certificados con el almacén de confianza de Python, siguiendo las [recomendaciones oficiales de Python](https://docs.python.org/3/library/ssl.html#ssl.create_default_context). No omite errores de confianza automáticamente.
+- Un header ausente o un puerto abierto es una observación; no confirma por sí solo una vulnerabilidad ni un CVE.
+- Traceroute usa `tracert` en Windows o `traceroute`/`tracepath` en Unix. Android puede limitarlo; se informa su ausencia y no se inventan saltos con conexiones TCP.
 
----
+## Módulos Bash clásicos
 
-## 🔍 Módulos — domaininfo.sh (análisis de dominio/IP)
-
-| # | Módulo | Descripción |
-|---|--------|-------------|
-| 1 | DNS Completo | A, AAAA, MX, NS, TXT, CNAME, SOA, CAA, DMARC, DNSSEC |
-| 2 | Geolocalización | País, ciudad, ISP, ASN, proxy/VPN/datacenter |
-| 3 | WHOIS | Registrar, fechas, organización, emails de abuso |
-| 4 | HTTP/HTTPS | Status, servidor, cookies, CMS detection |
-| 5 | Puertos | Nmap top 100 + versiones + scripts NSE |
-| 6 | Blacklists | 12 DNSBL (Spamhaus, SpamCop, SORBS…) |
-| 7 | Subdominios | Brute-force paralelo (250+ entradas, configurable hilos) |
-| 8 | Traceroute | Ruta de red 15 saltos, fallback Python |
-| 9 | Web Recon | robots.txt, sitemap.xml, 90+ rutas sensibles |
-| 10 | WAF Detection | Cloudflare/Akamai/Imperva/AWS + score de security headers |
-| 11 | SSL/TLS Vulns | TLS 1.0/1.1, POODLE/BEAST, cert expiry |
-| 12 | Tech Stack | CMS, framework, versiones expuestas, CORS |
-
----
-
-## 🌐 Módulo ISP/Network Audit (`modules/isp_audit.sh`)
-
-Para auditar la IP pública de cualquier empresa de internet (ISP, operador de telefonía, WiFi corporativo).
-
-| # | Módulo | Descripción |
-|---|--------|-------------|
-| 1 | Identificación | Empresa, ISP, ASN, país, ciudad, coordenadas + Shodan InternetDB |
-| 2 | Detección de equipo | Banner grabbing HTTP/SSH/Telnet/SNMP → Fabricante + modelo |
-| 3 | Puertos + acceso | 30 puertos críticos con nivel de riesgo y test de acceso |
-| 4 | Firewall | Inferencia de tipo de firewall + WAF + TTL-based OS detection |
-| 5 | CVEs y vulns | TR-069, DNS recursivo, proxy abierto, SNMP, WebFig sin auth |
-| 6 | Mitigaciones | Tabla de comandos RouterOS y recomendaciones técnicas |
-| 7 | Puntuación | Risk score 0-100 con barra visual + hallazgos clasificados |
-
-**Equipos que detecta:** MikroTik RouterOS, Huawei, Cisco IOS, Juniper JunOS, Ubiquiti, TP-Link, Tenda, ZyXEL, routers con Dropbear SSH.
-
-**CVEs cubiertos:**
-- `CVE-2018-14847` — Winbox credential leak (MikroTik, CVSS 9.1)
-- `CVE-2017-14462` — TR-069 RCE masivo en CPEs/módems
-- `CVE-2019-3978/3979` — DNS cache poisoning MikroTik
-
----
-
-## 📶 Módulo Red Local / WiFi (`modules/localnet.sh`)
-
-| # | Módulo | Descripción |
-|---|--------|-------------|
-| 1 | Info de red | Interfaz, IP local, gateway, SSID, BSSID, calidad señal |
-| 2 | Descubrimiento | Ping sweep paralelo o nmap -sn → hosts online con MAC y vendor |
-| 3 | Auditoría gateway | Puertos, fingerprinting, UPnP check, panel admin |
-| 4 | Análisis IoT | Por cada host: puertos, dispositivo detectado, credenciales default |
-| 5 | Vulns WiFi | KRACK, PMKID, Deauth, Evil Twin, WPS brute force, ARP spoofing |
-| 6 | Mitigaciones | Tabla completa de acciones con prioridad |
-| 7 | Puntuación | Risk score 0-100 con hallazgos |
-
----
-
-## 🕸️ Módulo Web App Audit (`modules/webapp.sh`)
-
-Basado en OWASP Top 10.
-
-| # | Módulo | Descripción |
-|---|--------|-------------|
-| 1 | Reconocimiento | Stack tech, CMS, server, cookies, versiones expuestas |
-| 2 | Security Headers | HSTS, CSP, X-Frame, X-Content-Type, Referrer-Policy, CORS |
-| 3 | SQLi | Indicadores de inyección SQL en parámetros GET y formularios |
-| 4 | XSS | Detección de reflexión de parámetros sin sanitizar |
-| 5 | Archivos sensibles | 90+ rutas: `.git/`, `.env`, `phpinfo.php`, `backup.sql`… |
-| 6 | Autenticación | CSRF tokens, HTTP Basic Auth, acceso a rutas protegidas |
-| 7 | Info Leak | IPs privadas, stack traces, debug info, versiones en headers |
-| 8 | WordPress | REST API users, xmlrpc.php, readme.html, debug.log |
-
----
-
-## 📁 Estructura del proyecto
-
-```
-domaininfo/
-├── domaininfo.sh          # Script principal — menú + 12 módulos
-├── install.sh             # Instalador automático
-├── report.py              # Generador de reportes HTML
-├── traceroute.py          # Fallback Python traceroute
-├── README.md
-├── LICENSE
-├── .gitignore
-├── modules/
-│   ├── dns.sh             # DNS completo
-│   ├── geo.sh             # Geolocalización
-│   ├── whois.sh           # WHOIS
-│   ├── http.sh            # HTTP/HTTPS analysis
-│   ├── ports.sh           # Port scanning
-│   ├── blacklist.sh       # DNSBL checks
-│   ├── subdomains.sh      # Subdomain bruteforce
-│   ├── traceroute.sh      # Network route
-│   ├── extra.sh           # Web recon extra
-│   ├── waf.sh             # WAF detection + headers
-│   ├── ssl.sh             # SSL/TLS vulnerabilities
-│   ├── tech.sh            # Tech stack detection
-│   ├── summary.sh         # Executive summary
-│   ├── isp_audit.sh       # ISP/Network device auditor ★
-│   ├── localnet.sh        # Local network/WiFi scanner ★
-│   └── webapp.sh          # Web app OWASP auditor ★
-├── wordlists/
-│   ├── subdomains.txt     # 250+ subdominios
-│   └── paths.txt          # 90+ rutas sensibles
-└── logs/
-    └── .gitkeep
+```bash
+bash install.sh --legacy
+bash domaininfo.sh -m quick example.com
+bash domaininfo.sh -m full -j -t 15 example.com
+bash domaininfo.sh --portable --doctor
 ```
 
----
+Para los módulos clásicos se necesita **Bash 4+**, curl, dig y las herramientas específicas de cada módulo (WHOIS, Nmap, OpenSSL, timeout/coreutils). En macOS ejecuta el Bash instalado por Homebrew; se reconoce `gtimeout`. Windows nativo usa el núcleo Python; los módulos clásicos requieren WSL/Linux y sus dependencias.
 
-## 📋 Reportes generados
+Se mantienen DNS extendido, geolocalización, WHOIS, subdominios, blacklists, stack web y los módulos de auditoría web/ISP/LAN. Son código heredado: algunos resultados son heurísticos y el acceso a interfaces, MAC/WiFi o sockets RAW depende del sistema y sus permisos. **No se garantiza paridad de auditorías WiFi entre Android, macOS y Windows.** La documentación histórica se conserva en [docs/LEGACY.md](docs/LEGACY.md); sus afirmaciones de cobertura de CVEs no equivalen a comprobaciones confirmadas.
 
-- **`.txt`** — Log plano en `logs/` al finalizar cada escaneo
-- **`.json`** — Datos estructurados (con flag `-j`)
-- **`.html`** — Reporte visual (si `python3` disponible)
+## Pruebas y correcciones
 
----
+```bash
+python3 -m unittest discover -s tests -v
+```
 
-## ⚠️ Disclaimer legal
+Las pruebas usan servicios locales y mocks para RDAP/TLS, sin auditar dominios ajenos. GitHub Actions ejecuta la suite con Python 3.10, 3.12 y 3.14 en Ubuntu, macOS y Windows. Termux requiere verificación manual en un dispositivo Android; los runners de GitHub no lo reproducen. Detalles de errores corregidos: [docs/FIXES.md](docs/FIXES.md).
 
-Usar **solo** en sistemas con **autorización explícita por escrito**.  
-El uso no autorizado viola la **Ley 1273/2009** (Colombia) y leyes equivalentes.  
-El autor no se responsabiliza por mal uso.
+Reportes en `logs/` (ignorados por Git). Utiliza los módulos activos solo sobre sistemas que tengas autorización para evaluar.
 
----
-
-<div align="center">
-
-**Hecho con ❤️ por [@kevxngg](https://github.com/kevxngg) · Señor K**
-
-</div>
+Licencia MIT. Autor: [@kevxngg](https://github.com/kevxngg).
