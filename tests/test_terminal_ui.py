@@ -212,6 +212,23 @@ class UITests(unittest.TestCase):
                 self.assertTrue(all(len(line) <= width for line in output.getvalue().splitlines()))
                 self.assertIn('MikroTik', output.getvalue())
 
+    def test_return_shortcut_preserves_preferences(self):
+        ui, output = self.ui(['1', '2.5', 'r'], Path('logs'))
+        ui.preferences(ui.defaults)
+        self.assertEqual(ui.defaults.timeout, 2.5)
+        self.assertIn('[0 / r] Regresar', output.getvalue())
+
+    def test_mikrotik_return_goes_to_its_submenu(self):
+        ui, output = self.ui(['5', '2', 'r', '0', '0'], Path('logs'))
+        with patch.object(core, 'scan', side_effect=AssertionError('scan')):
+            self.assertEqual(ui.run(), 0)
+        self.assertEqual(output.getvalue().count('[2]  Revisar solo una versión'), 2)
+
+    def test_return_at_home_does_not_exit(self):
+        ui, output = self.ui(['r', '0'], Path('logs'))
+        self.assertEqual(ui.run(), 0)
+        self.assertIn('Ya estás en el menú principal', output.getvalue())
+
 
 if __name__ == '__main__':
     unittest.main()
