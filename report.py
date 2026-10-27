@@ -11,7 +11,7 @@ import re
 import html
 from datetime import datetime
 
-VERSION = "3.2.0"
+VERSION = "4.0.0"
 
 TEMPLATE = """<!DOCTYPE html>
 <html lang="es">
@@ -220,7 +220,7 @@ def generate_html(log_path: str, output_path: str) -> None:
 {findings_html}</div>""")
 
     # ── Sección: Log completo (escapado) ──────────────────────────
-    raw_text = html.escape("\n".join(data["raw_lines"][:200]))
+    raw_text = html.escape("\n".join(data["raw_lines"]))
     html_sections.append(f"""
 <div class="section">
   <h2>📄 Log Completo</h2>
