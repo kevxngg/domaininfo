@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Auto-generated module — DomainInfo v3.1.0 — @kevxngg (Señor K)
+# Auto-generated module — DomainInfo v3.1.0 — @kevxngg (Kevin)
 # shellcheck disable=SC2034,SC1091
 
 # Colors (inherited from parent or redefined)
