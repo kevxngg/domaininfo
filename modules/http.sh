@@ -135,7 +135,7 @@ module_http() {
 
             # Días de validez restante
             local exp_epoch now_epoch days_ssl
-            exp_epoch=$(date -d "${not_after}" +%s 2>/dev/null)
+            exp_epoch=$(date -d "${not_after}" +%s 2>/dev/null || date -j -f "%b %d %T %Y %Z" "$not_after" +%s 2>/dev/null)
             now_epoch=$(date +%s)
             if [[ -n "$exp_epoch" ]]; then
                 days_ssl=$(( (exp_epoch - now_epoch) / 86400 ))
