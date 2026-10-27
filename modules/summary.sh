@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ================================================================
 #  summary.sh — Resumen ejecutivo
-#  DomainInfo v3.2.0 — @kevxngg (Señor K)
+#  DomainInfo v3.2.0 — @kevxngg (Kevin)
 # ================================================================
 # shellcheck disable=SC2034,SC1091
 
