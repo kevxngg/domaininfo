@@ -7,9 +7,11 @@
 # ================================================================
 
 # The portable CLI is available without Bash-specific dependencies.
-if [[ "${1:-}" == "--portable" || "${1:-}" == "--mikrotik" ]]; then
-    _portable_mode="$1"
-    shift
+if [[ "${1:-}" == "--portable" || "${1:-}" == "--mikrotik" || "${1:-}" == "--menu" ||
+      ( $# == 0 && "${BASH_SOURCE[0]}" == "$0" ) ]]; then
+    _portable_mode="${1:---menu}"
+    [[ $# -gt 0 ]] && shift
+    [[ "$_portable_mode" == "--menu" ]] && set -- --interactive "$@"
     [[ "$_portable_mode" == "--mikrotik" ]] && set -- -m mikrotik "$@"
     _portable_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     for _python in python3 python; do
@@ -19,11 +21,12 @@ if [[ "${1:-}" == "--portable" || "${1:-}" == "--mikrotik" ]]; then
     done
     echo 'Instala Python 3.10+ con bash install.sh.' >&2; exit 1
 fi
+if [[ "${1:-}" == "--legacy" ]]; then shift; fi
 if (( BASH_VERSINFO[0] < 4 )); then
     echo 'Los módulos clásicos necesitan Bash 4+. Usa python3 domaininfo.py o Bash de Homebrew.' >&2
     exit 1
 fi
-VERSION="4.1.0"
+VERSION="4.2.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export SCRIPT_DIR VERSION
 
