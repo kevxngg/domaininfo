@@ -85,7 +85,6 @@ _cleanup() {
     fi
     # Limpiar archivos temporales si existen
     [[ -n "${_TMPDIR_GLOBAL:-}" ]] && rm -rf "$_TMPDIR_GLOBAL" 2>/dev/null
-    echo -e "  ${DIM}Hasta luego, Kevin.${NC}"
     exit 130
 }
 trap '_cleanup' SIGINT SIGTERM
@@ -589,7 +588,7 @@ interactive_menu() {
                 ;;
 
             0)
-                echo -e "\n  ${DIM}Hasta luego, Kevin.${NC}\n"
+                echo ""
                 exit 0
                 ;;
 
