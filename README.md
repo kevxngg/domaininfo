@@ -35,6 +35,8 @@ El menú permite elegir auditoría, introducir el objetivo, revisar opciones e i
 
 Escribe números y pulsa ENTER; **0 vuelve** al menú anterior. CTRL+C cancela la acción actual. El programa regresa al inicio después del reporte y permite repetir auditorías. Las preferencias duran la sesión. El diseño adapta el ancho de las líneas a la terminal; los colores se desactivan con `NO_COLOR`, terminal básica o salida redirigida. No necesita librerías de interfaz adicionales.
 
+Las pantallas muestran **[0 / r] Regresar**. También puedes escribir `regresar` o `volver`; los cambios de preferencias se conservan al regresar. En MikroTik, cancelar la entrada vuelve a su submenú. En el inicio, `0` sale del programa y `r` permanece en el menú principal.
+
 En el asistente, una URL conserva protocolo y puerto; se revisa la raíz del sitio. Para HTTP se omite automáticamente TLS en los modos web/completo, salvo que vuelvas a activarlo desde los módulos. La CLI con objetivo conserva su salida JSON para automatización.
 
 ## Instalación
