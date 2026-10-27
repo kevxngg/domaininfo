@@ -22,13 +22,14 @@ import time
 from urllib import error, parse, request
 import uuid
 
-VERSION = "4.0.0"
-MODULES = ("dns", "rdap", "http", "tls", "ports", "traceroute")
+VERSION = "4.1.0"
+MODULES = ("dns", "rdap", "http", "tls", "ports", "traceroute", "mikrotik")
 MODES = {
     "quick": ("dns", "rdap"),
     "web": ("dns", "http", "tls"),
     "ports": ("dns", "ports"),
-    "full": MODULES,
+    "full": tuple(name for name in MODULES if name != "mikrotik"),
+    "mikrotik": ("mikrotik",),
 }
 DEFAULT_PORTS = (21, 22, 25, 53, 80, 110, 143, 443, 445, 587, 993, 995,
                  3306, 3389, 5432, 6379, 8080, 8443)
@@ -156,7 +157,7 @@ def ports_info(target, args):
         return {"port": port, "state": "closed_or_filtered", "attempts": attempts}
 
     with ThreadPoolExecutor(max_workers=args.threads) as pool:
-        return {"protocol": "tcp", "results": list(pool.map(check, args.ports))}
+        return {"protocol": "tcp", "results": list(pool.map(check, args.ports or DEFAULT_PORTS))}
 
 
 def trace_info(target, args):
@@ -178,8 +179,14 @@ def trace_info(target, args):
     return {"output": result.stdout, "returncode": result.returncode}
 
 
+def mikrotik_info(target, args):
+    import routeros
+    return routeros.audit(target, args, ports_info)
+
+
 RUNNERS = {"dns": dns_info, "rdap": rdap_info, "http": http_info,
-           "tls": tls_info, "ports": ports_info, "traceroute": trace_info}
+           "tls": tls_info, "ports": ports_info, "traceroute": trace_info,
+           "mikrotik": mikrotik_info}
 
 
 def scan(target, args):
@@ -281,7 +288,11 @@ def parser():
     cli.add_argument("-f", "--file", type=Path, help="Objetivos UTF-8, uno por línea")
     cli.add_argument("-t", "--threads", type=bounded_int(1, 64), default=15)
     cli.add_argument("--timeout", type=timeout_value, default=5.0)
-    cli.add_argument("--ports", type=port_list, default=DEFAULT_PORTS)
+    cli.add_argument("--ports", type=port_list, help="Puertos TCP; por defecto según el modo")
+    cli.add_argument("--routeros-version", help="Versión RouterOS declarada, por ejemplo 7.25")
+    cli.add_argument("--ssh-port", type=bounded_int(1, 65535), default=22,
+                     help="MikroTik: puerto SSH para leer el banner (sin autenticación)")
+    cli.add_argument("--offline", action="store_true", help="MikroTik: evaluar versión sin conectar a la red")
     cli.add_argument("-s", "--skip", choices=MODULES, action="append", default=[])
     cli.add_argument("--scheme", choices=("http", "https"), default="https")
     cli.add_argument("--web-port", type=bounded_int(1, 65535))
@@ -301,10 +312,23 @@ def main(argv=None):
     if args.doctor:
         print(json.dumps(doctor(), ensure_ascii=False, indent=2))
         return 0
+    if args.routeros_version or args.offline:
+        if args.mode != "mikrotik":
+            cli.error("--routeros-version y --offline requieren -m mikrotik")
+        if args.offline and (not args.routeros_version or args.target or args.file):
+            cli.error("--offline requiere --routeros-version y no acepta objetivos/archivos")
+        if args.routeros_version:
+            import routeros
+            try:
+                args.routeros_version = routeros.parse_version(args.routeros_version).text
+            except ValueError as exc:
+                cli.error(str(exc))
     if args.target and args.file:
         cli.error("Usa un objetivo o --file, no ambos")
     raw_targets = []
-    if args.file:
+    if args.offline:
+        raw_targets = ["routeros-offline"]
+    elif args.file:
         try:
             raw_targets = args.file.read_text(encoding="utf-8-sig").splitlines()
         except (OSError, UnicodeError) as exc:
@@ -312,14 +336,22 @@ def main(argv=None):
     elif args.target:
         raw_targets = [args.target]
     elif sys.stdin.isatty():
-        print("DomainInfo " + VERSION + " | 1 Rápido  2 Web  3 Puertos  4 Completo  0 Salir")
+        print("DomainInfo " + VERSION + " | 1 Rápido  2 Web  3 Puertos  4 Completo  5 MikroTik  0 Salir")
         choice = input("Opción [1]: ").strip() or "1"
         if choice == "0":
             return 0
-        if choice not in ("1", "2", "3", "4"):
+        if choice not in ("1", "2", "3", "4", "5"):
             cli.error("Opción inválida")
-        args.mode = {"1": "quick", "2": "web", "3": "ports", "4": "full"}[choice]
+        args.mode = {"1": "quick", "2": "web", "3": "ports", "4": "full", "5": "mikrotik"}[choice]
         raw_targets = [input("Dominio o IP: ")]
+        if args.mode == "mikrotik" and not args.routeros_version:
+            declared = input("Versión RouterOS (ENTER para intentar detectarla): ").strip()
+            if declared:
+                import routeros
+                try:
+                    args.routeros_version = routeros.parse_version(declared).text
+                except ValueError as exc:
+                    cli.error(str(exc))
     else:
         cli.error("Indica un objetivo, --file o --doctor")
     targets = []
