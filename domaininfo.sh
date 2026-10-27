@@ -6,7 +6,22 @@
 #  Versión: 3.2.0  |  Licencia: MIT
 # ================================================================
 
-VERSION="3.2.0"
+# The portable CLI is available without Bash-specific dependencies.
+if [[ "${1:-}" == "--portable" ]]; then
+    shift
+    _portable_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    for _python in python3 python; do
+        if command -v "$_python" >/dev/null 2>&1; then
+            exec "$_python" "$_portable_dir/domaininfo.py" "$@"
+        fi
+    done
+    echo 'Instala Python 3.10+ con bash install.sh.' >&2; exit 1
+fi
+if (( BASH_VERSINFO[0] < 4 )); then
+    echo 'Los módulos clásicos necesitan Bash 4+. Usa python3 domaininfo.py o Bash de Homebrew.' >&2
+    exit 1
+fi
+VERSION="4.0.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export SCRIPT_DIR VERSION
 
@@ -77,8 +92,8 @@ validate_target() {
     local i="$1"
     # Limpiar protocolo, path y espacios
     i="${i#http://}"; i="${i#https://}"; i="${i%%/*}"; i="${i%%:*}"
-    i="${i//[[:space:]]/}"
     i="${i//$'\r'/}"
+    [[ "$i" == *[[:space:]]* ]] && return 1
 
     [[ -z "$i" ]] && { echo ""; return 1; }
 
@@ -86,7 +101,7 @@ validate_target() {
     if [[ "$i" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
         local o1 o2 o3 o4
         IFS='.' read -r o1 o2 o3 o4 <<< "$i"
-        if (( o1<=255 && o2<=255 && o3<=255 && o4<=255 )); then
+        if (( 10#$o1<=255 && 10#$o2<=255 && 10#$o3<=255 && 10#$o4<=255 )); then
             printf '%s' "$i"; return 0
         fi
         return 1
@@ -117,7 +132,11 @@ load_modules() {
     for f in "${dir}"/*.sh; do
         [[ -f "$f" ]] || continue
         # shellcheck source=/dev/null
-        source "$f" 2>/dev/null && (( n++ ))
+        if source "$f"; then
+            (( n++ ))
+        else
+            warn "No se pudo cargar: $f"
+        fi
     done
     $VERBOSE && info "Módulos cargados: $n"
 }
@@ -127,7 +146,7 @@ load_modules() {
 # ════════════════════════════════════════════════════════════════
 check_deps() {
     local missing=()
-    for cmd in curl dig whois host; do
+    for cmd in curl dig; do
         command -v "$cmd" &>/dev/null || missing+=("$cmd")
     done
     if [[ ${#missing[@]} -gt 0 ]]; then
@@ -169,7 +188,7 @@ json_export() {
         printf '  "meta":{"tool":"DomainInfo","version":"%s","author":"@kevxngg","target":"%s","date":"%s","mode":"%s"},\n' \
             "$(_json_escape "$VERSION")" \
             "$(_json_escape "$TARGET")" \
-            "$(_json_escape "$(date -Iseconds)")" \
+            "$(_json_escape "$(date '+%Y-%m-%dT%H:%M:%S%z')")" \
             "$(_json_escape "$MODE")"
         printf '  "data":{\n'
         for k in "${!JSON_DATA[@]}"; do
@@ -218,13 +237,9 @@ module_subdomains() {
 
     # Directorio temporal con limpieza garantizada al salir de la función
     local tmpdir
-    tmpdir=$(mktemp -d)
+    tmpdir=$(mktemp -d) || { warn "No se pudo crear directorio temporal"; return 1; }
     # Registrar para limpieza global (por si SIGINT interrumpe)
     _TMPDIR_GLOBAL="$tmpdir"
-    # Limpiar al retornar de esta función
-    # shellcheck disable=SC2064
-    trap "rm -rf '$tmpdir'" RETURN
-
     printf "\n  ${W}${BOLD}%-40s %s${NC}\n" "SUBDOMINIO" "IP"
     echo -e "  ${DIM}$(printf '─%.0s' {1..56})${NC}"
 
@@ -257,8 +272,8 @@ module_subdomains() {
     echo ""
     (( fc == 0 )) && info "No se encontraron subdominios" || ok "$fc subdominios encontrados"
 
-    _TMPDIR_GLOBAL=""
     rm -rf "$tmpdir"
+    _TMPDIR_GLOBAL=""
 }
 
 # ════════════════════════════════════════════════════════════════
@@ -317,12 +332,16 @@ save_log() {
 # MODO DE ESCANEO
 # ════════════════════════════════════════════════════════════════
 run_scan() {
+    if $QUIET; then
+        ( QUIET=false; run_scan ) >/dev/null
+        return $?
+    fi
     # Resolver IP / Dominio
     if is_ip "$TARGET"; then
         IP="$TARGET"; DOMAIN="$TARGET"
     else
         DOMAIN="$TARGET"
-        IP=$(dig +short A "$TARGET" 2>/dev/null | grep -E '^[0-9.]+$' | head -1)
+        IP=$(dig +short +time=3 +tries=1 A "$TARGET" 2>/dev/null | grep -E '^[0-9.]+$' | head -1)
     fi
 
     $QUIET || {
@@ -374,7 +393,7 @@ run_scan() {
 # BANNER
 # ════════════════════════════════════════════════════════════════
 show_banner() {
-    clear
+    [[ -t 1 && -n "${TERM:-}" ]] && clear
     echo -e "${B}"
     echo '  ██████╗  ██████╗ ███╗   ███╗ █████╗ ██╗███╗   ██╗██╗███╗   ██╗███████╗ ██████╗'
     echo '  ██╔══██╗██╔═══██╗████╗ ████║██╔══██╗██║████╗  ██║██║████╗  ██║██╔════╝██╔═══██╗'
@@ -438,7 +457,7 @@ interactive_menu() {
 
         local choice
         printf "  ${W}${BOLD}Opción [0-8]: ${NC}"
-        read -r choice
+        read -r choice || return 0
 
         case "$choice" in
             1|2|3|4|5|6)
@@ -580,6 +599,13 @@ parse_args() {
     done
     shift $(( OPTIND - 1 ))
     CLI_TARGET="${1:-}"
+    [[ $# -le 1 ]] || { fail "Demasiados objetivos; usa -f"; exit 2; }
+    [[ "$MODE" =~ ^(quick|full|web|ports)$ ]] || { fail "Modo inválido: $MODE"; exit 2; }
+    [[ "$THREADS" =~ ^[0-9]+$ ]] && (( 10#$THREADS >= 1 && 10#$THREADS <= 64 )) || {
+        fail "Los hilos deben estar entre 1 y 64"; exit 2;
+    }
+    THREADS=$((10#$THREADS))
+    [[ -z "$FILE_INPUT" || -z "$CLI_TARGET" ]] || { fail "Usa -f o un objetivo, no ambos"; exit 2; }
 }
 
 # ════════════════════════════════════════════════════════════════
@@ -587,6 +613,10 @@ parse_args() {
 # ════════════════════════════════════════════════════════════════
 main() {
     parse_args "$@"
+    if ! command -v timeout >/dev/null 2>&1 && command -v gtimeout >/dev/null 2>&1; then
+        timeout() { gtimeout "$@"; }
+        export -f timeout
+    fi
     check_deps || exit 1
     load_modules
 
