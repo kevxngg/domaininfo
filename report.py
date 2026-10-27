@@ -11,7 +11,7 @@ import re
 import html
 from datetime import datetime
 
-VERSION = "4.0.0"
+VERSION = "4.1.0"
 
 TEMPLATE = """<!DOCTYPE html>
 <html lang="es">
