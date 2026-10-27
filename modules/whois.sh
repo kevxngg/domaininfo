@@ -20,6 +20,7 @@ warn()    { echo -e "  ${Y}[!]${NC} $1"; }
 info()    { echo -e "  ${DIM}ℹ  $1${NC}"; }
 
 module_whois() {
+    command -v whois >/dev/null 2>&1 || { warn "WHOIS opcional no disponible; usa el módulo RDAP portable"; return 0; }
     header "3 ▸ WHOIS — PROPIETARIO"
 
     local whois_target="${DOMAIN:-$IP}"
