@@ -331,7 +331,8 @@ isp_ports() {
                     ((ISP_RISK+=20))
                     ;;
                 8291)
-                    _warn "   → Winbox: verificar CVE-2018-14847 (cred leak RouterOS < 6.42.1)"
+                    _warn "   → Winbox accesible: esto no confirma un CVE"
+                    _info "   Auditoría actual de RouterOS: python3 domaininfo.py -m mikrotik $ip"
                     ;;
                 161)
                     _warn "   → SNMP UDP: verificar community strings por defecto"
