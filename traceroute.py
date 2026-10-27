@@ -30,8 +30,11 @@ def traceroute(dest_name, max_hops=15, timeout=2):
             recv_socket = socket.socket(socket.AF_INET, socket.SOCK_RAW, icmp)
             send_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, udp)
         except PermissionError:
-            # Termux / sin root — usar TCP connect como fallback
-            _traceroute_tcp(dest_addr, dest_name, max_hops, timeout)
+            # A TCP connection cannot reveal intermediate routers without ICMP.
+            if 'recv_socket' in locals():
+                recv_socket.close()
+            print('  [!] Sin permisos RAW: no es posible medir saltos con este método.')
+            print('  Usa traceroute/tracepath o python domaininfo.py -m full.')
             return
 
         recv_socket.settimeout(timeout)
@@ -67,26 +70,6 @@ def traceroute(dest_name, max_hops=15, timeout=2):
         if curr_addr == dest_addr:
             print(f"\n  Destino alcanzado.")
             break
-
-def _traceroute_tcp(dest_addr, dest_name, max_hops, timeout):
-    """Fallback TCP para entornos sin permisos RAW socket (Termux sin root)"""
-    print(f"  [!] Sin permisos RAW — usando TCP connect fallback\n")
-    port = 80
-    for ttl in range(1, max_hops + 1):
-        start = time.time()
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(timeout)
-            result = s.connect_ex((dest_addr, port))
-            rtt = round((time.time() - start) * 1000, 2)
-            s.close()
-            if result == 0:
-                print(f"  {ttl:2d}  {dest_addr:<55}  {rtt} ms  [REACHED]")
-                break
-            else:
-                print(f"  {ttl:2d}  {dest_addr:<55}  {rtt} ms")
-        except Exception:
-            print(f"  {ttl:2d}  * * *")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
