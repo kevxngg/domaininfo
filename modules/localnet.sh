@@ -95,14 +95,15 @@ localnet_iface_info() {
 localnet_discover() {
     _h "2 ▸ DESCUBRIMIENTO DE HOSTS"
 
-    local network="${LN_NETWORK:-192.168.1.0/24}"
+    [[ -n "${LN_NETWORK:-}" ]] || { _warn "Red no detectada; no se escaneará un rango supuesto"; return 1; }
+    local network="$LN_NETWORK"
     _info "Red a escanear: $network"
     _warn "Esto puede tardar 30-60 segundos..."
     echo ""
 
     local base; base=$(echo "$network" | cut -d. -f1-3)
-    local tmpdir; tmpdir=$(mktemp -d)
-    trap 'rm -rf "$tmpdir"' RETURN
+    local tmpdir; tmpdir=$(mktemp -d) || return 1
+    _TMPDIR_GLOBAL="$tmpdir"
 
     printf "  ${W}${BOLD}%-18s %-20s %-20s %s${NC}\n" "IP" "MAC" "FABRICANTE" "ESTADO"
     echo -e "  ${DIM}$(printf '─%.0s' {1..70})${NC}"
@@ -142,6 +143,9 @@ localnet_discover() {
         echo ""
         _info "No se encontraron hosts (puede requerir root para ARP scan)"
     fi
+
+    rm -rf "$tmpdir"
+    _TMPDIR_GLOBAL=""
 
     # ARP table complement
     _s "Tabla ARP local"
