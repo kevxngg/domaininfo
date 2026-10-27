@@ -32,7 +32,7 @@ module_ports() {
         warn "Esto puede tardar 30-60 segundos..."
         echo ""
         local nmap_out
-        nmap_out=$(nmap -T4 --top-ports 100 -sV --open \
+        nmap_out=$(nmap -sT -T4 --host-timeout 90s --top-ports 100 -sV --open \
             --script "banner,http-title,ssl-cert,ftp-bounce" \
             "$scan_target" 2>/dev/null)
         local open_ports
@@ -66,9 +66,9 @@ module_ports() {
         echo ""
 
         local common_ports=(21 22 23 25 53 80 110 143 443 445 587 993 995 3306 3389 5432 6379 8080 8443 27017)
-        local tmpdir; tmpdir=$(mktemp -d)
+        local tmpdir; tmpdir=$(mktemp -d) || return 1
         # shellcheck disable=SC2064
-        trap "rm -rf '$tmpdir'" RETURN
+        _TMPDIR_GLOBAL="$tmpdir"
 
         printf "  ${W}${BOLD}%-20s %s${NC}\n" "PUERTO" "ESTADO"
         echo -e "  ${DIM}$(printf '─%.0s' {1..30})${NC}"
