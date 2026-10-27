@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 import domaininfo as core
-from terminal_ui import InteractiveApp, Plan, safe_text
+from terminal_ui import InteractiveApp, Plan, safe_text, logo_lines
 
 
 class UITests(unittest.TestCase):
@@ -159,7 +159,7 @@ class UITests(unittest.TestCase):
         result = subprocess.run([sys.executable, 'domaininfo.py', '--interactive'], input='0\n',
                                 text=True, capture_output=True, encoding='utf-8', timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('Qué quieres revisar', result.stdout)
+        self.assertIn('CENTRO DE CONTROL', result.stdout)
 
     def test_main_automatic_tty_entry(self):
         with patch.object(core.sys.stdin, 'isatty', return_value=True), \
@@ -195,6 +195,22 @@ class UITests(unittest.TestCase):
             self.assertEqual(len(ui.history), 1)
             self.assertEqual(ui.history[0]['paths'], [])
             self.assertIn('No se pudieron guardar', output.getvalue())
+
+    def test_ascii_logo_fits_desktop_and_mobile(self):
+        for available in (28, 34, 36, 60, 76, 86):
+            with self.subTest(available=available):
+                art = logo_lines(available)
+                self.assertTrue(all(row.isascii() and len(row) <= available for row in art))
+                self.assertGreaterEqual(len(art), 3)
+
+    def test_home_panels_fit_at_common_widths(self):
+        for width in (32, 38, 60, 78, 80, 90):
+            with self.subTest(width=width):
+                ui, output = self.ui(['0'], Path('logs'))
+                with patch('terminal_ui.shutil.get_terminal_size', return_value=shutil.os.terminal_size((width, 24))):
+                    ui.run()
+                self.assertTrue(all(len(line) <= width for line in output.getvalue().splitlines()))
+                self.assertIn('MikroTik', output.getvalue())
 
 
 if __name__ == '__main__':
