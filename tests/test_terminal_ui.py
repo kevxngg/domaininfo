@@ -31,7 +31,7 @@ class UITests(unittest.TestCase):
             self.assertIn('CVE-2026-67278', text)
             self.assertIn('7.24.2', text)
             self.assertIn('Versión RouterOS inválida', text)
-            self.assertIn('Hasta luego, Kevin', text)
+            self.assertNotIn('Hasta luego', text)
             self.assertNotIn('"modules":', text)
             self.assertNotIn('\x1b', text)
 
@@ -159,7 +159,7 @@ class UITests(unittest.TestCase):
         result = subprocess.run([sys.executable, 'domaininfo.py', '--interactive'], input='0\n',
                                 text=True, capture_output=True, encoding='utf-8', timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('CENTRO DE CONTROL', result.stdout)
+        self.assertIn('MENÚ PRINCIPAL', result.stdout)
 
     def test_main_automatic_tty_entry(self):
         with patch.object(core.sys.stdin, 'isatty', return_value=True), \
@@ -228,6 +228,30 @@ class UITests(unittest.TestCase):
         ui, output = self.ui(['r', '0'], Path('logs'))
         self.assertEqual(ui.run(), 0)
         self.assertIn('Ya estás en el menú principal', output.getvalue())
+
+    def test_explained_routeros_results_include_matching_branch_fix(self):
+        import routeros
+        ui, output = self.ui([], Path('logs'))
+        ui.details({'meta': {'target': 'routeros-offline'}, 'modules': {
+            'mikrotik': {'status': 'ok', 'data': routeros.assess('7.24.2')}}})
+        text = output.getvalue()
+        self.assertIn('CVE-2026-67278', text)
+        self.assertIn('Versión que corrige este aviso en esa rama: 7.24.3', text)
+        self.assertNotIn('"affected_ranges"', text)
+
+    def test_summary_explains_certificate_error(self):
+        ui, output = self.ui([], Path('logs'))
+        ui.summary({'modules': {'tls': {'status': 'error', 'error': 'CERTIFICATE_VERIFY_FAILED'}}})
+        self.assertIn('No se pudo validar el certificado', output.getvalue())
+        self.assertNotIn('CERTIFICATE_VERIFY_FAILED', output.getvalue())
+
+    def test_viewer_details_are_readable_and_json_is_separate(self):
+        ui, output = self.ui(['1', '', '0'], Path('logs'))
+        entry = {'report': {'meta': {'target': 'localhost'}, 'modules': {
+            'ports': {'status': 'ok', 'data': {'results': [{'port': 22, 'state': 'open'}]}}}}, 'paths': []}
+        ui.viewer(entry)
+        self.assertIn('[RESPONDE] 22/TCP', output.getvalue())
+        self.assertNotIn('"modules":', output.getvalue())
 
 
 if __name__ == '__main__':
