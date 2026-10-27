@@ -1,4 +1,4 @@
-# DomainInfo 4
+# DomainInfo 4.1
 
 Diagnóstico de dominios e IPs para **Termux, Kali/Linux, macOS y Windows**, por [@kevxngg](https://github.com/kevxngg).
 
@@ -65,6 +65,7 @@ También puedes usar `py -3 domaininfo.py example.com`. El instalador opcional `
 | `web` | DNS, HTTP, headers y certificado TLS verificado |
 | `ports` | DNS y conexiones TCP concurrentes, sin sockets RAW |
 | `full` | Todos los anteriores y traceroute del sistema, si está disponible |
+| `mikrotik` | RouterOS 6/7: servicios de gestión, versión y avisos de seguridad recientes |
 
 Incluye dominios internacionales (IDNA), archivos batch UTF-8 con BOM/CRLF, eliminación de duplicados, errores por módulo, reportes JSON/TXT/HTML, escritura atómica y nombres únicos. El TXT contiene el mismo documento estructurado que el JSON. Los reportes HTML escapan el contenido remoto.
 
@@ -87,6 +88,28 @@ En Windows sustituye `python3` por `python` o `py -3`.
 
 Los resultados salen como un documento JSON por objetivo. Código de salida: `0` sin errores, `1` si hay objetivos inválidos, módulos fallidos o error al guardar, `2` para argumentos inválidos y `130` al interrumpir. Un módulo omitido o traceroute no disponible no invalida los demás resultados.
 
+### Auditoría MikroTik / RouterOS
+
+```bash
+# Equipo propio/autorizado: conexiones TCP y lectura de banners públicos
+python3 domaininfo.py -m mikrotik 192.168.88.1
+
+# Si el equipo no publica su versión, indícala desde tu inventario
+python3 domaininfo.py -m mikrotik --routeros-version 7.25 192.168.88.1
+
+# Revisar una versión sin conectar con ningún equipo ni servicio de Internet
+python3 domaininfo.py -m mikrotik --offline --routeros-version 7.24.2
+
+# Servicios en puertos personalizados
+python3 domaininfo.py -m mikrotik --ports 2222,8443 --ssh-port 2222 --web-port 8443 192.168.88.1
+```
+
+El catálogo revisado el **26 de octubre de 2026** cubre seis avisos de septiembre de 2026 publicados por MikroTik/CERT Polska, con rangos separados para RouterOS 6 y 7. Incluye la corrección posterior del aviso de certificados; distingue stable de los parches de la rama long-term. Las versiones de referencia de la instantánea son stable **7.25**, long-term **7.23.8** y rama 6 **6.49.23**. Son referencias fechadas, no una consulta automática de actualizaciones.
+
+No prueba contraseñas, no ejecuta exploits y no cambia la configuración. Un resultado `potentially_affected` corresponde a la versión informada; no confirma explotación. `not_in_affected_range` se refiere solamente a los seis avisos del catálogo y no significa que el equipo sea seguro. Sin versión, con datos contradictorios o con beta/rc solicita revisión manual. El código de salida indica si se completó el diagnóstico, no si hay avisos aplicables.
+
+Disponible en el menú Python, opción **5**; en el menú Bash clásico, opción **9**, y directamente mediante `bash domaininfo.sh --mikrotik ...`. Los reportes usan los mismos formatos JSON/TXT/HTML. Detalles, fuentes y límites en [docs/MIKROTIK.md](docs/MIKROTIK.md).
+
 ### Límites de los resultados
 
 - DNS portable consulta A/AAAA mediante el resolver del sistema. Los registros MX/TXT/NS y los módulos especializados siguen disponibles en Bash.
@@ -102,6 +125,7 @@ bash install.sh --legacy
 bash domaininfo.sh -m quick example.com
 bash domaininfo.sh -m full -j -t 15 example.com
 bash domaininfo.sh --portable --doctor
+bash domaininfo.sh --mikrotik --offline --routeros-version 7.25
 ```
 
 Para los módulos clásicos se necesita **Bash 4+**, curl, dig y las herramientas específicas de cada módulo (WHOIS, Nmap, OpenSSL, timeout/coreutils). En macOS ejecuta el Bash instalado por Homebrew; se reconoce `gtimeout`. Windows nativo usa el núcleo Python; los módulos clásicos requieren WSL/Linux y sus dependencias.
