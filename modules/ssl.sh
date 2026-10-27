@@ -32,21 +32,21 @@ module_ssl_vulns() {
 
     # Verificar TLS 1.0 (obsoleto e inseguro)
     local tls10 tls11 tls12 tls13
-    tls10=$(echo | timeout 5 openssl s_client -connect "${DOMAIN}:443" -tls1 2>/dev/null | grep "Cipher" | head -1)
-    tls11=$(echo | timeout 5 openssl s_client -connect "${DOMAIN}:443" -tls1_1 2>/dev/null | grep "Cipher" | head -1)
-    tls12=$(echo | timeout 5 openssl s_client -connect "${DOMAIN}:443" -tls1_2 2>/dev/null | grep "Cipher" | head -1)
-    tls13=$(echo | timeout 5 openssl s_client -connect "${DOMAIN}:443" -tls1_3 2>/dev/null | grep "Cipher" | head -1)
+    tls10=$(echo | timeout 5 openssl s_client -servername "$DOMAIN" -connect "${DOMAIN}:443" -tls1 2>/dev/null | grep -E 'Cipher is|Cipher *:' | grep -vE 'NONE|0000' | head -1)
+    tls11=$(echo | timeout 5 openssl s_client -servername "$DOMAIN" -connect "${DOMAIN}:443" -tls1_1 2>/dev/null | grep -E 'Cipher is|Cipher *:' | grep -vE 'NONE|0000' | head -1)
+    tls12=$(echo | timeout 5 openssl s_client -servername "$DOMAIN" -connect "${DOMAIN}:443" -tls1_2 2>/dev/null | grep -E 'Cipher is|Cipher *:' | grep -vE 'NONE|0000' | head -1)
+    tls13=$(echo | timeout 5 openssl s_client -servername "$DOMAIN" -connect "${DOMAIN}:443" -tls1_3 2>/dev/null | grep -E 'Cipher is|Cipher *:' | grep -vE 'NONE|0000' | head -1)
 
     if [[ -n "$tls10" ]] && ! echo "$tls10" | grep -q "no peer\|error\|failure"; then
         kv_r "TLS 1.0" "SOPORTADO — obsoleto (POODLE/BEAST risk)"
     else
-        ok "TLS 1.0 deshabilitado"
+        info "TLS 1.0: negociación no confirmada (servidor o política local)"
     fi
 
     if [[ -n "$tls11" ]] && ! echo "$tls11" | grep -q "no peer\|error\|failure"; then
         kv_r "TLS 1.1" "SOPORTADO — obsoleto"
     else
-        ok "TLS 1.1 deshabilitado"
+        info "TLS 1.1: negociación no confirmada (servidor o política local)"
     fi
 
     if [[ -n "$tls12" ]] && ! echo "$tls12" | grep -q "no peer\|error\|failure"; then
@@ -63,7 +63,7 @@ module_ssl_vulns() {
 
     section "Certificado SSL"
     local cert_info
-    cert_info=$(echo | timeout 5 openssl s_client -connect "${DOMAIN}:443" 2>/dev/null | openssl x509 -noout -dates -subject -issuer 2>/dev/null)
+    cert_info=$(echo | timeout 5 openssl s_client -servername "$DOMAIN" -connect "${DOMAIN}:443" 2>/dev/null | openssl x509 -noout -dates -subject -issuer 2>/dev/null)
     if [[ -n "$cert_info" ]]; then
         local not_after
         not_after=$(echo "$cert_info" | grep "notAfter" | cut -d= -f2)
