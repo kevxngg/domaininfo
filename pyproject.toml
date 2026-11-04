@@ -1,0 +1,32 @@
+# Installs the portable Python core as the `domaininfo` command:
+#   pipx install git+https://github.com/kevxngg/domaininfo
+# The classic Bash modules need a clone of the repository.
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "domaininfo"
+version = "4.3.0"
+description = "Diagnóstico de dominios e IPs para Termux, Kali/Linux, macOS y Windows"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Kevin Hernández (kevxngg)" }]
+keywords = ["osint", "dns", "rdap", "tls", "network-diagnostics", "routeros", "termux"]
+classifiers = [
+    "Environment :: Console",
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: System :: Networking :: Monitoring",
+]
+
+[project.urls]
+Homepage = "https://github.com/kevxngg/domaininfo"
+Author = "https://kevxngg.github.io/"
+
+[project.scripts]
+domaininfo = "domaininfo:entry"
+
+[tool.setuptools]
+py-modules = ["domaininfo", "terminal_ui", "routeros", "report", "traceroute", "completions"]

@@ -22,8 +22,10 @@ import time
 from urllib import error, parse, request
 import uuid
 
-VERSION = "4.2.0"
-MODULES = ("dns", "rdap", "http", "tls", "ports", "traceroute", "mikrotik")
+VERSION = "4.3.0"
+REPO = "kevxngg/domaininfo"
+CERT_WARN_DAYS = 30
+MODULES =("dns", "rdap", "http", "tls", "ports", "traceroute", "mikrotik")
 MODES = {
     "quick": ("dns", "rdap"),
     "web": ("dns", "http", "tls"),
@@ -137,9 +139,20 @@ def tls_info(target, args):
         with context.wrap_socket(raw, server_hostname=target) as conn:
             cert = conn.getpeercert()
             expiry = ssl.cert_time_to_seconds(cert["notAfter"])
+            days = int((expiry - time.time()) // 86400)
             return {"verified": True, "protocol": conn.version(),
                     "cipher": conn.cipher(), "certificate": cert,
-                    "days_remaining": int((expiry - time.time()) // 86400)}
+                    "expires": datetime.fromtimestamp(expiry, timezone.utc).date().isoformat(),
+                    "days_remaining": days, "expiry_warning": expiry_warning(days)}
+
+
+def expiry_warning(days):
+    """'expired', 'soon' (30 days or less) or None; shared by the CLI and the menu."""
+    if days is None:
+        return None
+    if days < 0:
+        return "expired"
+    return "soon" if days <= CERT_WARN_DAYS else None
 
 
 def ports_info(target, args):
@@ -208,7 +221,8 @@ def scan(target, args, on_progress=None):
             report["modules"][name] = {"status": "error", "error": str(exc)}
         if on_progress:
             on_progress(name, report["modules"][name]["status"], index, len(MODES[args.mode]))
-        if not args.quiet:
+        # The readable output draws its own progress; JSON mode keeps the classic stderr lines.
+        if not args.quiet and not getattr(args, "human", False):
             print(f"[{name}] {report['modules'][name]['status']}", file=sys.stderr)
     return report
 
@@ -285,30 +299,238 @@ def doctor():
                          ("traceroute", "tracepath", "tracert", "bash", "nmap", "dig", "whois")}}
 
 
+EXAMPLES = """\
+ejemplos:
+  domaininfo                                    menú guiado
+  domaininfo example.com                        análisis rápido (DNS + registro)
+  domaininfo -m web example.com                 web, cabeceras y certificado TLS
+  domaininfo -m ports --ports 22,80,443 10.0.0.5
+  domaininfo -m full -s traceroute example.com  todo menos la ruta de red
+  domaininfo -f objetivos.txt -m web --format html
+  domaininfo -m mikrotik 192.168.88.1
+  domaininfo -m mikrotik --offline --routeros-version 7.24.2
+  domaininfo -m web --watch 300 example.com     vigilar y avisar de cambios
+  domaininfo example.com --json --pretty        JSON con sangría
+  domaininfo example.com | jq .                 en una tubería sale JSON automáticamente
+
+salida:
+  En una terminal se muestra un resumen legible con colores. Si la salida va a otro
+  programa o archivo, o usas --json/-q, se imprime el JSON de siempre (uno por objetivo).
+  NO_COLOR desactiva los colores. Códigos de salida: 0 correcto, 1 errores en módulos u
+  objetivos, 2 argumentos inválidos, 130 interrumpido.
+
+Usa los modos de red solo sobre sistemas que tengas autorización para revisar."""
+
+
+class SpanishHelp(argparse.RawDescriptionHelpFormatter):
+    def add_usage(self, usage, actions, groups, prefix=None):
+        return super().add_usage(usage, actions, groups, "uso: " if prefix is None else prefix)
+
+
 def parser():
-    cli = argparse.ArgumentParser(description="DomainInfo: diagnóstico portable de dominios e IPs")
-    cli.add_argument("target", nargs="?", help="Dominio, IPv4, IPv6 o URL HTTP/HTTPS")
-    cli.add_argument("--version", action="version", version=VERSION)
-    cli.add_argument("--doctor", action="store_true", help="Diagnóstico local, sin escaneos")
-    cli.add_argument("--interactive", action="store_true", help="Abrir el menú guiado")
-    cli.add_argument("-m", "--mode", choices=MODES, default="quick")
-    cli.add_argument("-f", "--file", type=Path, help="Objetivos UTF-8, uno por línea")
-    cli.add_argument("-t", "--threads", type=bounded_int(1, 64), default=15)
-    cli.add_argument("--timeout", type=timeout_value, default=5.0)
-    cli.add_argument("--ports", type=port_list, help="Puertos TCP; por defecto según el modo")
-    cli.add_argument("--routeros-version", help="Versión RouterOS declarada, por ejemplo 7.25")
-    cli.add_argument("--ssh-port", type=bounded_int(1, 65535), default=22,
-                     help="MikroTik: puerto SSH para leer el banner (sin autenticación)")
-    cli.add_argument("--offline", action="store_true", help="MikroTik: evaluar versión sin conectar a la red")
-    cli.add_argument("-s", "--skip", choices=MODULES, action="append", default=[])
-    cli.add_argument("--scheme", choices=("http", "https"), default="https")
-    cli.add_argument("--web-port", type=bounded_int(1, 65535))
-    cli.add_argument("-o", "--output", type=Path, default=Path("logs"))
-    cli.add_argument("--format", choices=("json", "txt", "html", "all"), default="all")
-    cli.add_argument("-j", action="store_true", help="Compatibilidad: JSON ya incluido por defecto")
-    cli.add_argument("-q", "--quiet", action="store_true", help="Solo JSON en stdout")
-    cli.add_argument("-v", "--verbose", action="store_true", help="Incluye rutas de reportes en stderr")
+    cli = argparse.ArgumentParser(prog="domaininfo", add_help=False, formatter_class=SpanishHelp,
+                                  description="DomainInfo: diagnóstico portable de dominios e IPs",
+                                  epilog=EXAMPLES)
+    cli._positionals.title = "argumentos"
+    cli._optionals.title = "general"
+    cli.add_argument("target", nargs="?", help="dominio, IPv4, IPv6 o URL HTTP/HTTPS")
+    cli.add_argument("-h", "--help", action="help", help="muestra esta ayuda y sale")
+    cli.add_argument("--version", action="version", version=VERSION, help="muestra la versión y sale")
+    cli.add_argument("--interactive", action="store_true", help="abre el menú guiado")
+    cli.add_argument("--doctor", action="store_true", help="diagnóstico local del equipo, sin escaneos")
+    cli.add_argument("--update", action="store_true", help="actualiza DomainInfo a la última versión")
+    cli.add_argument("--completion", choices=("bash", "zsh", "powershell"),
+                     help="imprime el script de autocompletado para tu shell")
+
+    audit = cli.add_argument_group("auditoría")
+    audit.add_argument("-m", "--mode", choices=MODES, default="quick",
+                       help="quick: DNS y registro · web: HTTP, cabeceras y TLS · ports: puertos TCP · "
+                            "full: todo · mikrotik: RouterOS (por defecto: %(default)s)")
+    audit.add_argument("-f", "--file", type=Path, metavar="ARCHIVO",
+                       help="archivo UTF-8 con un objetivo por línea (# para comentarios)")
+    audit.add_argument("-s", "--skip", choices=MODULES, action="append", default=[], metavar="MÓDULO",
+                       help="omite un módulo; se puede repetir: " + ", ".join(MODULES))
+    audit.add_argument("--watch", type=bounded_int(5, 86400), metavar="SEGUNDOS",
+                       help="repite la revisión cada N segundos y avisa solo de los cambios (CTRL+C para salir)")
+
+    network = cli.add_argument_group("red")
+    network.add_argument("-t", "--threads", type=bounded_int(1, 64), default=15, metavar="N",
+                         help="conexiones TCP simultáneas, 1-64 (por defecto: %(default)s)")
+    network.add_argument("--timeout", type=timeout_value, default=5.0, metavar="SEG",
+                         help="espera máxima por conexión, 0.1-60 s (por defecto: %(default)s)")
+    network.add_argument("--ports", type=port_list, metavar="LISTA",
+                         help="puertos TCP separados por comas, p. ej. 22,80,443 (por defecto según el modo)")
+    network.add_argument("--scheme", choices=("http", "https"), default="https",
+                         help="protocolo para el modo web (por defecto: %(default)s)")
+    network.add_argument("--web-port", type=bounded_int(1, 65535), metavar="PUERTO",
+                         help="puerto del servidor web (por defecto 443 o 80)")
+
+    router = cli.add_argument_group("mikrotik")
+    router.add_argument("--routeros-version", metavar="VERSIÓN",
+                        help="versión RouterOS declarada, por ejemplo 7.25")
+    router.add_argument("--ssh-port", type=bounded_int(1, 65535), default=22, metavar="PUERTO",
+                        help="puerto SSH para leer el banner, sin autenticación (por defecto: %(default)s)")
+    router.add_argument("--offline", action="store_true",
+                        help="evalúa la versión sin conectar con ningún equipo")
+
+    output = cli.add_argument_group("salida")
+    output.add_argument("--json", action="store_true",
+                        help="imprime JSON aunque estés en una terminal")
+    output.add_argument("--pretty", action="store_true", help="JSON con sangría, más fácil de leer")
+    output.add_argument("-q", "--quiet", action="store_true",
+                        help="solo JSON en stdout, sin progreso")
+    output.add_argument("-o", "--output", type=Path, default=Path("logs"), metavar="CARPETA",
+                        help="carpeta de reportes (por defecto: %(default)s)")
+    output.add_argument("--format", choices=("json", "txt", "html", "all"), default="all",
+                        help="formatos de reporte que se guardan (por defecto: %(default)s)")
+    output.add_argument("--open", action="store_true", help="abre el reporte HTML al terminar")
+    output.add_argument("-v", "--verbose", action="store_true",
+                        help="muestra las rutas de los reportes en stderr")
+    output.add_argument("-j", action="store_true", help=argparse.SUPPRESS)  # old flag: same as --json
     return cli
+
+
+def latest_release(timeout=5):
+    """Latest published tag on GitHub, or None without network."""
+    try:
+        meta, body = fetch(f"https://api.github.com/repos/{REPO}/releases/latest", timeout, 256 * 1024)
+        return json.loads(body).get("tag_name") if meta["status"] == 200 else None
+    except (OSError, ValueError):
+        return None
+
+
+def self_update():
+    here = Path(__file__).resolve().parent
+    latest = latest_release()
+    print(f"Instalada: v{VERSION}" + (f" · última publicada: {latest}" if latest else ""))
+    if (here / ".git").exists() and shutil.which("git"):
+        result = subprocess.run(["git", "-C", str(here), "pull", "--ff-only"], check=False)
+        if result.returncode:
+            print("No se pudo actualizar con git. Revisa si tienes cambios locales en " + str(here),
+                  file=sys.stderr)
+        return result.returncode
+    print("Esta copia no es un repositorio git. Actualiza con el método que usaste al instalar:")
+    print("  pipx upgrade domaininfo")
+    print(f"  pip install --upgrade git+https://github.com/{REPO}")
+    return 0
+
+
+def open_html(paths):
+    import webbrowser
+    for path in paths:
+        if path.endswith(".html"):
+            try:
+                webbrowser.open(Path(path).resolve().as_uri())
+            except (OSError, webbrowser.Error):
+                print("No se pudo abrir el navegador: " + path, file=sys.stderr)
+            return
+
+
+def fingerprint(report):
+    """Facts that matter for --watch; volatile values (dates, days left) stay out."""
+    facts = {}
+    for name, module in report["modules"].items():
+        facts[name + ".status"] = module["status"]
+        data = module.get("data") if isinstance(module.get("data"), dict) else {}
+        if name == "dns":
+            facts["dns.addresses"] = ", ".join(data.get("addresses", []))
+        elif name == "http":
+            facts["http.status"] = data.get("status")
+            facts["http.missing_headers"] = ", ".join(data.get("missing_headers", []))
+        elif name == "tls":
+            cert = data.get("certificate") or {}
+            facts["tls.expires"] = data.get("expires")
+            facts["tls.serial"] = cert.get("serialNumber")
+            facts["tls.protocol"] = data.get("protocol")
+        elif name == "ports":
+            facts["ports.open"] = ", ".join(str(row["port"]) for row in data.get("results", [])
+                                            if row.get("state") == "open")
+        elif name == "mikrotik":
+            facts["mikrotik.version"] = data.get("version")
+    return facts
+
+
+FACT_LABELS = {"dns.addresses": "Direcciones", "http.status": "Estado HTTP",
+               "http.missing_headers": "Cabeceras ausentes", "tls.expires": "Caducidad del certificado",
+               "tls.serial": "Número de serie del certificado", "tls.protocol": "Protocolo TLS",
+               "ports.open": "Puertos abiertos", "mikrotik.version": "Versión RouterOS"}
+
+
+def describe_changes(before, after):
+    changes = []
+    for key in sorted(set(before) | set(after)):
+        if before.get(key) != after.get(key):
+            label = FACT_LABELS.get(key) or ("Módulo " + key.split(".")[0])
+            changes.append(f"{label}: {before.get(key) or '—'} → {after.get(key) or '—'}")
+    return changes
+
+
+def emit_json(report, args):
+    print(json.dumps(report, ensure_ascii=False, indent=2 if args.pretty else None), flush=True)
+
+
+def run_targets(targets, args, view):
+    """One pass over every target; returns (failed, reports)."""
+    failed, reports = False, []
+    formats = ("json", "txt", "html") if args.format == "all" else (args.format,)
+    for target in targets:
+        report = scan(target, args, on_progress=view.progress if view else None)
+        try:
+            paths = save_report(report, args.output, formats)
+        except OSError as exc:
+            print(f"No se pudo guardar reporte: {exc}", file=sys.stderr)
+            failed = True
+            paths = []
+        if args.verbose:
+            print("Reportes: " + ", ".join(paths), file=sys.stderr)
+        if view:
+            view.report(report, paths)
+        else:
+            emit_json(report, args)
+        if args.open:
+            open_html(paths)
+        failed |= any(module["status"] == "error" for module in report["modules"].values())
+        reports.append(report)
+    return failed, reports
+
+
+def watch(targets, args, view):
+    """Repeat the audit and report only what changed, until CTRL+C."""
+    _, reports = run_targets(targets, args, view)
+    known = {report["meta"]["target"]: fingerprint(report) for report in reports}
+    if view:
+        view.note(f"Vigilando {len(targets)} objetivo(s) cada {args.watch} s. CTRL+C para salir.")
+    saved_open, args.open = args.open, False
+    try:
+        while True:
+            time.sleep(args.watch)
+            for target in targets:
+                report = scan(target, args, on_progress=view.progress if view else None)
+                facts = fingerprint(report)
+                changes = describe_changes(known.get(target, {}), facts)
+                known[target] = facts
+                stamp = datetime.now().strftime("%H:%M:%S")
+                if not changes:
+                    if view:
+                        view.quiet_tick(f"[{stamp}] {target}: sin cambios")
+                    continue
+                formats = ("json", "txt", "html") if args.format == "all" else (args.format,)
+                try:
+                    save_report(report, args.output, formats)
+                except OSError as exc:
+                    print(f"No se pudo guardar reporte: {exc}", file=sys.stderr)
+                if view:
+                    view.changes(stamp, target, changes)
+                else:
+                    print(json.dumps({"event": "change", "time": datetime.now(timezone.utc).isoformat(),
+                                      "target": target, "changes": changes, "report": report},
+                                     ensure_ascii=False, indent=2 if args.pretty else None), flush=True)
+    except KeyboardInterrupt:
+        if view:
+            view.note("Vigilancia detenida.")
+        return 0
+    finally:
+        args.open = saved_open
 
 
 def main(argv=None):
@@ -316,6 +538,12 @@ def main(argv=None):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     cli = parser()
     args = cli.parse_args(argv)
+    if args.completion:
+        from completions import script
+        print(script(args.completion, cli))
+        return 0
+    if args.update:
+        return self_update()
     if args.doctor:
         print(json.dumps(doctor(), ensure_ascii=False, indent=2))
         return 0
@@ -363,26 +591,26 @@ def main(argv=None):
             invalid = True
     if not targets:
         cli.error("No hay objetivos válidos")
-    failed = invalid
-    for target in targets:
-        report = scan(target, args)
-        formats = ("json", "txt", "html") if args.format == "all" else (args.format,)
-        try:
-            paths = save_report(report, args.output, formats)
-        except OSError as exc:
-            print(f"No se pudo guardar reporte: {exc}", file=sys.stderr)
-            failed = True
-            paths = []
-        if args.verbose:
-            print("Reportes: " + ", ".join(paths), file=sys.stderr)
-        print(json.dumps(report, ensure_ascii=False))
-        failed |= any(module["status"] == "error" for module in report["modules"].values())
-    return 1 if failed else 0
+    # Readable view only for a person at a terminal; pipes, files, --json and -q keep JSON.
+    args.human = not (args.json or args.j or args.quiet or args.pretty) and sys.stdout.isatty()
+    view = None
+    if args.human:
+        from terminal_ui import CliView
+        view = CliView(sys.modules[__name__], args)
+    if args.watch:
+        return watch(targets, args, view)
+    failed, _ = run_targets(targets, args, view)
+    return 1 if failed or invalid else 0
 
 
-if __name__ == "__main__":
+def entry():
+    """Console entry point (pipx/pip) and direct execution."""
     try:
         sys.exit(main())
     except (KeyboardInterrupt, EOFError):
         print("Interrumpido", file=sys.stderr)
         sys.exit(130)
+
+
+if __name__ == "__main__":
+    entry()

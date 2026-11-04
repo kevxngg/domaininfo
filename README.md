@@ -1,4 +1,4 @@
-# DomainInfo 4.2
+# DomainInfo 4.3
 
 Diagnóstico de dominios e IPs para **Termux, Kali/Linux, macOS y Windows**, por [@kevxngg](https://github.com/kevxngg).
 
@@ -33,15 +33,25 @@ El menú permite elegir auditoría, introducir el objetivo, revisar opciones e i
 - **Preferencias y diagnóstico**: tiempo por conexión, concurrencia, formatos y carpeta de resultados.
 - **Auditorías clásicas**: acceso a los módulos Bash cuando el entorno tiene sus dependencias.
 
-Escribe números y pulsa ENTER; **0 vuelve** al menú anterior. CTRL+C cancela la acción actual. El programa regresa al inicio después del reporte y permite repetir auditorías. Las preferencias duran la sesión. El diseño adapta el ancho de las líneas a la terminal; los colores se desactivan con `NO_COLOR`, terminal básica o salida redirigida. No necesita librerías de interfaz adicionales.
+En una terminal real basta con **pulsar la tecla** de la opción, sin ENTER (con `DOMAININFO_ENTER=1` vuelve el modo número + ENTER, que también se usa en listas de más de nueve elementos); **0 vuelve** al menú anterior. CTRL+C cancela la acción actual. El programa regresa al inicio después del reporte y permite repetir auditorías. Las preferencias duran la sesión. El diseño adapta el ancho de las líneas a la terminal; los colores se desactivan con `NO_COLOR`, terminal básica o salida redirigida. No necesita librerías de interfaz adicionales.
 
 Las pantallas muestran **[0 / r] Regresar**. También puedes escribir `regresar` o `volver`; los cambios de preferencias se conservan al regresar. En MikroTik, cancelar la entrada vuelve a su submenú. En el inicio, `0` sale del programa y `r` permanece en el menú principal.
 
 Los resultados se presentan en español: comprobaciones terminadas, errores explicados y servicios que respondieron. **Ver resultados explicados** describe cada aviso de RouterOS y muestra el parche de la rama aplicable. **Ver datos JSON** conserva la información técnica completa como opción separada. Al salir no hay despedidas personalizadas; el nombre del autor aparece únicamente como crédito.
 
-En el asistente, una URL conserva protocolo y puerto; se revisa la raíz del sitio. Para HTTP se omite automáticamente TLS en los modos web/completo, salvo que vuelvas a activarlo desde los módulos. La CLI con objetivo conserva su salida JSON para automatización.
+En el asistente, una URL conserva protocolo y puerto; se revisa la raíz del sitio. Para HTTP se omite automáticamente TLS en los modos web/completo, salvo que vuelvas a activarlo desde los módulos. Con un objetivo en la línea de comandos verás un resumen legible; para automatizar se conserva el JSON (ver [Uso en la terminal](#uso-en-la-terminal)).
 
 ## Instalación
+
+### Como comando con pipx (Linux, macOS, Windows y Termux)
+
+```bash
+pipx install git+https://github.com/kevxngg/domaininfo
+domaininfo --doctor
+domaininfo example.com
+```
+
+Instala el núcleo portable como el comando `domaininfo`, disponible en cualquier carpeta. Actualiza con `pipx upgrade domaininfo`. Los módulos Bash clásicos necesitan clonar el repositorio con los pasos de abajo.
 
 ### Termux
 
@@ -123,7 +133,42 @@ En Windows sustituye `python3` por `python` o `py -3`.
 
 `-t` limita conexiones TCP a 1–64 trabajadores. `--timeout` limita cada operación de conexión/lectura, entre 0.1 y 60 segundos; la resolución DNS del sistema y las redirecciones no tienen un límite global. `-s` puede repetirse. `--scheme http --web-port 8080` permite inspeccionar un servidor local. Una URL se normaliza a su host; configura protocolo y puerto con estas opciones, ya que la ruta y puerto de la URL no se conservan.
 
-Los resultados salen como un documento JSON por objetivo. Código de salida: `0` sin errores, `1` si hay objetivos inválidos, módulos fallidos o error al guardar, `2` para argumentos inválidos y `130` al interrumpir. Un módulo omitido o traceroute no disponible no invalida los demás resultados.
+## Uso en la terminal
+
+**Salida legible o JSON.** En una terminal, `domaininfo example.com` muestra un resumen con colores: direcciones, estado HTTP, certificado con su fecha de caducidad, puertos que respondieron con el nombre habitual del servicio y la carpeta de los reportes. Si la salida va a otro programa o a un archivo, o usas `--json` o `-q`, se imprime el JSON de siempre, un documento por objetivo, así que los scripts existentes siguen funcionando.
+
+```bash
+domaininfo example.com                 # resumen legible
+domaininfo example.com --json          # JSON en una línea
+domaininfo example.com --pretty        # JSON con sangría
+domaininfo example.com | jq .          # en una tubería sale JSON automáticamente
+domaininfo -m web example.com --open   # abre el reporte HTML al terminar
+```
+
+**Certificados.** El resumen avisa en amarillo si el certificado caduca en 30 días o menos y en rojo si ya caducó. El JSON del módulo TLS incluye `expires` y `expiry_warning` (`soon`, `expired` o `null`).
+
+**Vigilancia.** `--watch SEGUNDOS` repite la revisión (mínimo 5 s) y solo avisa cuando algo cambia: direcciones, estado HTTP, cabeceras, certificado renovado, puertos que se abren o cierran, versión RouterOS o un módulo que empieza a fallar. Se guarda un reporte en cada cambio. CTRL+C termina.
+
+```bash
+domaininfo -m web --watch 300 example.com
+domaininfo -m ports --ports 22,443 --watch 60 192.168.1.10
+domaininfo -m web --watch 600 -q example.com   # eventos JSON {"event": "change", ...}
+```
+
+**Autocompletado con TAB.** `install.sh` instala el de Bash en la carpeta estándar de bash-completion. También puedes cargarlo a mano:
+
+```bash
+eval "$(domaininfo --completion bash)"   # en ~/.bashrc
+eval "$(domaininfo --completion zsh)"    # en ~/.zshrc
+```
+
+En PowerShell añade a tu perfil (`notepad $PROFILE`): `domaininfo --completion powershell | Out-String | Invoke-Expression`. Completa opciones, modos, módulos de `-s` y formatos.
+
+**Actualizar.** `domaininfo --update` muestra la versión instalada y la última publicada; en una copia clonada ejecuta `git pull --ff-only` y en otras instalaciones indica el comando de `pipx` o `pip`.
+
+`domaininfo --help` explica cada opción con sus valores por defecto y ejemplos.
+
+Código de salida: `0` sin errores, `1` si hay objetivos inválidos, módulos fallidos o error al guardar, `2` para argumentos inválidos y `130` al interrumpir. Un módulo omitido o traceroute no disponible no invalida los demás resultados.
 
 ### Auditoría MikroTik / RouterOS
 

@@ -26,7 +26,7 @@ if (( BASH_VERSINFO[0] < 4 )); then
     echo 'Los módulos clásicos necesitan Bash 4+. Usa python3 domaininfo.py o Bash de Homebrew.' >&2
     exit 1
 fi
-VERSION="4.2.0"
+VERSION="4.3.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export SCRIPT_DIR VERSION
 

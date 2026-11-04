@@ -69,5 +69,14 @@ mkdir -p "$bin_dir"
 printf '#!/usr/bin/env bash\nexec %q %q "$@"\n' "$(command -v "$PYTHON")" "$SCRIPT_DIR/domaininfo.py" > "$bin_dir/domaininfo"
 chmod +x "$bin_dir/domaininfo"
 "$PYTHON" "$SCRIPT_DIR/domaininfo.py" --doctor
+# Bash completion in the standard per-user folder; bash-completion loads it on its own.
+completion_dir="${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions"
+if [[ -n "${TERMUX_VERSION:-}" || "${PREFIX:-}" == *com.termux* ]]; then
+    completion_dir="$PREFIX/share/bash-completion/completions"
+fi
+mkdir -p "$completion_dir"
+"$PYTHON" "$SCRIPT_DIR/domaininfo.py" --completion bash > "$completion_dir/domaininfo"
 printf '\nInstalado: %s/domaininfo\n' "$bin_dir"
 printf 'Si no está en PATH: export PATH="%s:$PATH"\n' "$bin_dir"
+printf 'Autocompletado Bash (TAB): %s/domaininfo\n' "$completion_dir"
+printf 'Zsh: añade a ~/.zshrc la línea  eval "$(domaininfo --completion zsh)"\n'

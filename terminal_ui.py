@@ -80,6 +80,18 @@ def safe_text(value):
     return "".join(char if char.isprintable() or char == "\n" else " " for char in text)
 
 
+COMMON_SERVICES = {21: "ftp", 22: "ssh", 23: "telnet", 25: "smtp", 53: "dns", 80: "http", 110: "pop3",
+                   135: "msrpc", 139: "netbios", 143: "imap", 443: "https", 445: "smb", 587: "submission", 993: "imaps", 995: "pop3s",
+                   2000: "winbox-bw", 3306: "mysql", 3389: "rdp", 5432: "postgresql", 6379: "redis",
+                   8080: "http-alt", 8291: "winbox", 8443: "https-alt", 8728: "api", 8729: "api-ssl"}
+
+
+def service_label(port):
+    """'22 (ssh)'; the name is the usual one for that port, not a detected service."""
+    name = COMMON_SERVICES.get(port)
+    return f"{port} ({name})" if name else str(port)
+
+
 class Back(Exception):
     pass
 
@@ -114,6 +126,9 @@ class InteractiveApp:
         self.history = []
         self.last_target = ""
         self.at_home = False
+        # Single-key menus in a real terminal; DOMAININFO_ENTER=1 keeps NUMBER + ENTER.
+        self.instant = (input_fn is None and self.tty and sys.stdin.isatty()
+                        and not os.environ.get("DOMAININFO_ENTER"))
 
     @property
     def width(self):
@@ -189,8 +204,12 @@ class InteractiveApp:
                     print("  " + row, file=self.out)
         self.line()
         self.panel("NAVEGACIÓN", [("[h] Ayuda rápida     [0] Salir", "90")], "90")
-        self.line("Elige un módulo para comenzar. NÚMERO + ENTER" if self.width >= 60
-                  else "NÚMERO + ENTER · 0 para salir", "90")
+        if self.instant:
+            self.line("Pulsa la tecla de la opción para comenzar." if self.width >= 60
+                      else "Pulsa una tecla · 0 para salir", "90")
+        else:
+            self.line("Elige un módulo para comenzar. NÚMERO + ENTER" if self.width >= 60
+                      else "NÚMERO + ENTER · 0 para salir", "90")
 
     def screen(self, title, subtitle="", home=False):
         self.at_home = home
@@ -257,7 +276,66 @@ class InteractiveApp:
             except (ValueError, UnicodeError, OSError, argparse.ArgumentTypeError) as exc:
                 self.line(str(exc), "33")
 
+    @staticmethod
+    def read_key():
+        """One key press without ENTER; CTRL+C and CTRL+D/Z keep their usual meaning."""
+        if os.name == "nt":
+            import msvcrt
+            key = msvcrt.getwch()
+            if key in ("\x00", "\xe0"):  # arrows and function keys send a second code
+                msvcrt.getwch()
+                return ""
+        else:
+            import select
+            import termios
+            import tty
+            fd = sys.stdin.fileno()
+            saved = termios.tcgetattr(fd)
+            try:
+                tty.setraw(fd)
+                key = os.read(fd, 4).decode("utf-8", "ignore")
+                if key.startswith("\x1b"):  # escape sequences (arrows): drop the rest
+                    while select.select([fd], [], [], 0.02)[0]:
+                        os.read(fd, 16)
+                    return ""
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+            key = key[:1]
+        if key == "\x03":
+            raise KeyboardInterrupt
+        if key in ("\x04", "\x1a"):
+            raise EOFError
+        return key
+
+    def choose_key(self, keys, label, default):
+        hint = f" [{safe_text(default)}]" if default not in (None, "") else ""
+        while True:
+            self.out.write("  " + self.style(f"> {safe_text(label)}{hint}:", "1;36") + " ")
+            self.out.flush()
+            key = self.read_key().lower()
+            if key in ("\r", "\n"):
+                if default is None:
+                    self.out.write("\n")
+                    continue
+                key = str(default)
+            self.out.write((key if key.isprintable() else "") + "\n")
+            self.out.flush()
+            if key == "0":
+                raise Back()
+            if key == "r":
+                if self.at_home:
+                    self.line("Ya estás en el menú principal. Usa 0 para salir.", "90")
+                    continue
+                raise Back()
+            if key in keys:
+                return key
+            if key:
+                self.line("Opción no válida. Pulsa una de las teclas del menú; 0 para volver.", "33")
+
     def choose(self, keys, label="Elige una opción", default=None):
+        if self.instant and all(len(key) == 1 for key in keys):
+            return self.choose_key(keys, label, default)
+
         def validate(value):
             value = value.lower()
             if value not in keys:
@@ -608,18 +686,36 @@ class InteractiveApp:
             elif name == "rdap":
                 self.line("Registro: " + str(data.get("name") or data.get("handle") or "respuesta disponible en el reporte"))
             elif name == "http":
-                self.line(f"HTTP: {data.get('status', '?')} · {data.get('title') or 'sin título'}")
+                status = data.get("status", "?")
+                color = "32" if str(status).startswith("2") else "36" if str(status).startswith("3") else "33"
+                self.line(f"HTTP: {status} · {data.get('title') or 'sin título'}", color)
                 missing = data.get("missing_headers", [])
                 self.line("Cabeceras recomendadas ausentes: " + (", ".join(missing) if missing else "ninguna de las comprobadas"))
             elif name == "tls":
-                self.line(f"TLS: {data.get('protocol')} · certificado verificado · {data.get('days_remaining')} días restantes")
+                self.tls_summary(data)
             elif name == "ports":
-                opened = [str(row.get("port")) for row in data.get("results", []) if row.get("state") == "open"]
-                self.line("Puertos TCP accesibles: " + (", ".join(opened) if opened else "ninguno en la lista revisada"))
+                rows = data.get("results", [])
+                opened = [row.get("port") for row in rows if row.get("state") == "open"]
+                self.line("Puertos TCP accesibles: " + (", ".join(service_label(port) for port in opened)
+                                                        if opened else "ninguno en la lista revisada"),
+                          "32" if opened else None)
+                if rows:
+                    self.line(f"Sin respuesta: {len(rows) - len(opened)} de {len(rows)} puertos revisados", "90")
             elif name == "traceroute":
                 self.line("Ruta de red: " + (data.get("reason", "no disponible") if data.get("status") == "unavailable" else "disponible en el detalle"))
             elif name == "mikrotik":
                 self.routeros_summary(data)
+
+    def tls_summary(self, data):
+        days, expires = data.get("days_remaining"), data.get("expires")
+        when = f"caduca el {expires}" if expires else "fecha de caducidad no disponible"
+        if days is not None and days < 0:
+            self.line(f"TLS: {data.get('protocol')} · certificado CADUCADO hace {-days} días ({expires})", "1;31")
+        elif days is not None and days <= self.core.CERT_WARN_DAYS:
+            self.line(f"TLS: {data.get('protocol')} · certificado verificado · {when}", "33")
+            self.line(f"Aviso: el certificado caduca en {days} días. Conviene renovarlo pronto.", "33")
+        else:
+            self.line(f"TLS: {data.get('protocol')} · certificado verificado · {when} ({days} días)", "32")
 
     def routeros_summary(self, data):
         source = {"user_supplied": "indicada por ti", "public_banner": "banner público", "unknown": "no obtenida"}
@@ -645,6 +741,12 @@ class InteractiveApp:
     def explain_error(error):
         text = str(error)
         lower = text.lower()
+        if "certificate has expired" in lower:
+            return "El certificado está caducado. El sitio debe renovarlo."
+        if "unable to get local issuer certificate" in lower:
+            # Common on Windows: the root is only downloaded when a browser first needs it.
+            return ("Este equipo no reconoce la autoridad que firmó el certificado (falta su raíz en el "
+                    "almacén del sistema). No significa por sí solo que el sitio esté mal configurado.")
         if any(word in lower for word in ("certificate_verify_failed", "certificate verify failed", "certificate failed")):
             return "No se pudo validar el certificado. Revisa su confianza, nombre y fecha."
         if any(word in lower for word in ("getaddrinfo", "name or service", "name resolution", "nodename nor servname")):
@@ -837,8 +939,13 @@ class InteractiveApp:
         self.item("1", "Abrir menú clásico")
         self.item("0", "Volver")
         self.choose({"1"})
+        script = Path(__file__).resolve().with_name("domaininfo.sh")
+        if not script.exists():  # installed with pipx/pip: only the Python core is packaged
+            self.line("Los módulos Bash no vienen en la instalación con pipx.", "33")
+            self.line("Clona el repositorio para usarlos: git clone https://github.com/kevxngg/domaininfo")
+            self.pause()
+            return
         try:
-            script = Path(__file__).resolve().with_name("domaininfo.sh")
             subprocess.run([selected, str(script), "--legacy"], check=False)
         except OSError as exc:
             self.line(f"No se pudo abrir el menú clásico: {exc}", "33")
@@ -856,3 +963,53 @@ class InteractiveApp:
         self.line("En una URL se respeta protocolo y puerto; se revisa la raíz del sitio.")
         self.line("Usa los modos de red sobre equipos que tengas autorización para revisar.")
         self.pause()
+
+
+class CliView:
+    """Readable output for `domaininfo <objetivo>` at a terminal; pipes keep the JSON."""
+
+    STATUS = {"running": "en curso", "ok": "listo", "error": "error", "skipped": "omitido"}
+
+    def __init__(self, core, args, output=None, errors=None):
+        self.app = InteractiveApp(core, args, output=output or sys.stdout)
+        self.err = errors or sys.stderr
+        self.live = bool(getattr(self.err, "isatty", lambda: False)())
+        self.hinted = False
+
+    def _status_line(self, text):
+        if self.live:
+            clear = "\r\033[2K" if self.app.color else "\r" + " " * (self.app.width - 1) + "\r"
+            self.err.write(clear + (("  " + self.app.style(text[:self.app.width - 4], "90")) if text else ""))
+            self.err.flush()
+
+    def progress(self, name, status, position, total):
+        if status == "running":
+            self._status_line(f"[{position}/{total}] {MODULE_LABELS.get(name, name)} · {self.STATUS[status]}…")
+        else:
+            self._status_line("")
+
+    def report(self, report, paths):
+        app, meta = self.app, report.get("meta", {})
+        app.line()
+        app.line(f"{meta.get('target', '')} · {MODE_LABELS.get(meta.get('mode'), (meta.get('mode'),))[0]}", "1;36")
+        app.summary(report)
+        if paths:
+            folder = str(Path(paths[0]).parent)
+            kinds = ", ".join(Path(path).suffix.lstrip(".") for path in paths)
+            app.line(f"Reportes ({kinds}) en {folder}", "90")
+        if not self.hinted:
+            app.line("JSON: --json · Ayuda y ejemplos: --help", "90")
+            self.hinted = True
+
+    def note(self, text):
+        self._status_line("")
+        self.app.line(text, "90")
+
+    def quiet_tick(self, text):
+        self._status_line(text)
+
+    def changes(self, stamp, target, changes):
+        self._status_line("")
+        self.app.line(f"[{stamp}] {target}: {len(changes)} cambio(s)", "1;33")
+        for change in changes:
+            self.app.line("  • " + change, "33")
