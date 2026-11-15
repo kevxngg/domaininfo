@@ -23,14 +23,21 @@ MODE_LABELS = {
     "quick": ("Análisis rápido", "Resolver IPs y consultar el registro del dominio"),
     "web": ("Sitio web y certificado", "HTTP, cabeceras de seguridad y conexión TLS"),
     "ports": ("Puertos TCP", "Comprobar servicios accesibles en tu equipo"),
-    "full": ("Diagnóstico completo", "DNS, registro, web, TLS, puertos y ruta de red"),
+    "full": ("Diagnóstico completo", "Todo: DNS, registro, red, web, TLS, correo, subdominios y puertos"),
+    "mail": ("Correo del dominio", "SPF, DMARC, DKIM y MTA-STS: ¿se puede suplantar el dominio?"),
+    "recon": ("Reconocimiento OSINT", "Subdominios, red (ASN), tecnologías e historia del dominio"),
+    "brand": ("Marca y phishing", "Dominios parecidos registrados que podrían imitar el tuyo"),
     "mikrotik": ("MikroTik / RouterOS", "Versión, servicios de gestión y avisos aplicables"),
 }
-MODE_KEYS = {"1": "quick", "2": "web", "3": "ports", "4": "full", "5": "mikrotik"}
+MODE_KEYS = {"1": "quick", "2": "web", "3": "ports", "4": "full", "5": "mikrotik",
+             "e": "mail", "s": "recon", "p": "brand"}
 MODULE_LABELS = {"dns": "Resolución de direcciones", "rdap": "Registro RDAP",
                  "http": "Sitio y cabeceras HTTP", "tls": "Certificado TLS",
                  "ports": "Servicios TCP", "traceroute": "Ruta de red",
-                 "mikrotik": "Auditoría RouterOS"}
+                 "mikrotik": "Auditoría RouterOS", "asn": "Red y operador (ASN)",
+                 "mail": "Seguridad del correo", "tech": "Tecnologías y cabeceras",
+                 "subdomains": "Subdominios", "history": "Historia del dominio",
+                 "lookalike": "Dominios parecidos"}
 MODULE_HELP = {
     "dns": "Direcciones IPv4/IPv6 que el sistema devuelve para el objetivo.",
     "rdap": "Datos públicos del registro del dominio o del bloque de direcciones IP.",
@@ -39,7 +46,15 @@ MODULE_HELP = {
     "ports": "Servicios TCP que respondieron desde este equipo durante la revisión.",
     "traceroute": "Saltos de red informados por la herramienta de ruta del sistema.",
     "mikrotik": "Comparación de la versión RouterOS con los avisos del catálogo fechado.",
+    "asn": "Sistema autónomo, bloque de red, país, operador y nombre inverso de cada IP.",
+    "mail": "SPF, DMARC, DKIM, MTA-STS, TLS-RPT y BIMI: si alguien puede enviar correo falso en nombre del dominio.",
+    "tech": "Tecnologías detectadas, nota de las cabeceras de seguridad, cookies, favicon y security.txt.",
+    "subdomains": "Subdominios publicados en registros de certificados y subdominios que podrían ser tomados.",
+    "history": "Antigüedad y caducidad del registro, registrador y capturas en la Wayback Machine.",
+    "lookalike": "Variantes del nombre (errores de tecleo, homoglifos, otros TLD) que están registradas.",
 }
+SEVERITY_COLORS = {"alta": "1;31", "media": "33", "baja": "36", "info": "90"}
+SEVERITY_LABELS = {"alta": "ALTA", "media": "MEDIA", "baja": "BAJA", "info": "INFO"}
 ADVISORY_LABELS = {"potentially_affected": "REVISAR: versión incluida en el aviso",
                    "not_in_affected_range": "Versión fuera del intervalo afectado",
                    "unknown_version": "SIN EVALUAR: falta la versión",
@@ -182,7 +197,8 @@ class InteractiveApp:
         audit = [(key, MODE_LABELS[mode][0],
                   {"quick": "DNS + registro del dominio", "web": "HTTP + cabeceras + TLS",
                    "ports": "Servicios TCP accesibles", "full": "Todos los módulos generales",
-                   "mikrotik": "Router en red o versión offline"}[mode])
+                   "mikrotik": "Router en red o versión offline", "mail": "¿Se puede suplantar el correo?",
+                   "recon": "Subdominios, red y tecnologías", "brand": "Dominios que imitan el tuyo"}[mode])
                  for key, mode in MODE_KEYS.items()]
         workspace = [("6", "Varios objetivos", "Auditoría desde un archivo"),
                      ("7", "Mis reportes", "Resultados y exportaciones"),
@@ -631,7 +647,7 @@ class InteractiveApp:
 
             def progress(name, status, position, total):
                 labels = {"running": "EN CURSO", "ok": "LISTO", "error": "ERROR", "skipped": "OMITIDO"}
-                text = f"[{position}/{total}] {MODULE_LABELS[name]} · {labels[status]}"
+                text = f"[{position}/{total}] {MODULE_LABELS.get(name, name)} · {labels[status]}"
                 if self.tty:
                     self.out.write("\r\033[2K" if self.color else "\r" + " " * (self.width - 1) + "\r")
                     self.out.write("  " + self.style(text[:self.width - 4], "33" if status == "error" else "36"))
@@ -670,43 +686,158 @@ class InteractiveApp:
         skipped = sum(item.get("status") == "skipped" for item in modules.values())
         self.panel("RESUMEN", [(f"Comprobaciones: {done} terminadas / {errors} con error / {skipped} omitidas",
                                 "33" if errors else "32")])
+        score = report.get("score")
+        if isinstance(score, dict) and score.get("grade"):
+            counts = {level: sum(f["severity"] == level for f in score.get("findings", []))
+                      for level in ("alta", "media", "baja")}
+            color = "32" if score["grade"] in ("A", "B") else "33" if score["grade"] == "C" else "1;31"
+            self.line(f"Nota de seguridad: {score['grade']} ({score['score']}/100) · "
+                      f"{counts['alta']} altos, {counts['media']} medios, {counts['baja']} bajos", color)
+            for finding in score.get("findings", [])[:5]:
+                if finding["severity"] in ("alta", "media"):
+                    self.line(f"  [{SEVERITY_LABELS[finding['severity']]}] {finding['title']}",
+                              SEVERITY_COLORS[finding["severity"]])
         for name, item in modules.items():
-            label = MODULE_LABELS.get(name, name)
-            if item.get("status") == "error":
-                self.line(f"{label}: {self.explain_error(item.get('error', 'sin detalle'))}", "33")
-                continue
-            if item.get("status") == "skipped":
-                self.line(f"{label}: omitido", "90")
-                continue
-            data = item.get("data", {})
-            if not isinstance(data, dict):
-                continue
-            if name == "dns":
-                self.line("Direcciones: " + ", ".join(data.get("addresses", [])))
-            elif name == "rdap":
-                self.line("Registro: " + str(data.get("name") or data.get("handle") or "respuesta disponible en el reporte"))
-            elif name == "http":
-                status = data.get("status", "?")
-                color = "32" if str(status).startswith("2") else "36" if str(status).startswith("3") else "33"
-                self.line(f"HTTP: {status} · {data.get('title') or 'sin título'}", color)
-                missing = data.get("missing_headers", [])
-                self.line("Cabeceras recomendadas ausentes: " + (", ".join(missing) if missing else "ninguna de las comprobadas"))
-            elif name == "tls":
-                self.tls_summary(data)
-            elif name == "ports":
-                rows = data.get("results", [])
-                opened = [row.get("port") for row in rows if row.get("state") == "open"]
-                self.line("Puertos TCP accesibles: " + (", ".join(service_label(port) for port in opened)
-                                                        if opened else "ninguno en la lista revisada"),
-                          "32" if opened else None)
-                if rows:
-                    self.line(f"Sin respuesta: {len(rows) - len(opened)} de {len(rows)} puertos revisados", "90")
-            elif name == "traceroute":
-                self.line("Ruta de red: " + (data.get("reason", "no disponible") if data.get("status") == "unavailable" else "disponible en el detalle"))
-            elif name == "mikrotik":
-                self.routeros_summary(data)
+            self.module_summary(name, item)
+
+    def module_summary(self, name, item):
+        label = MODULE_LABELS.get(name, name)
+        if item.get("status") == "error":
+            self.line(f"{label}: {self.explain_error(item.get('error', 'sin detalle'))}", "33")
+            return
+        if item.get("status") == "skipped":
+            self.line(f"{label}: omitido" + (f" ({item['reason']})" if item.get("reason") else ""), "90")
+            return
+        data = item.get("data", {})
+        if not isinstance(data, dict):
+            return
+        if name == "dns":
+            self.line("Direcciones: " + (", ".join(data.get("addresses", [])) or "ninguna"))
+            records = data.get("records") or {}
+            if records.get("NS"):
+                self.line("Servidores DNS: " + ", ".join(records["NS"][:4]))
+            if records.get("MX"):
+                self.line("Correo (MX): " + ", ".join(f"{r['host']} ({r['priority']})" for r in records["MX"][:4]
+                                                     if isinstance(r, dict)))
+            if records.get("CNAME"):
+                self.line("Alias (CNAME): " + ", ".join(records["CNAME"]))
+            if data.get("records") is not None:
+                self.line(f"DNSSEC: {'activo' if data.get('dnssec') else 'no'} · CAA: "
+                          + ("sí" if records.get("CAA") else "no"), "32" if data.get("dnssec") else None)
+            if data.get("ptr"):
+                self.line("Nombre inverso: " + ", ".join(data["ptr"]))
+        elif name == "rdap":
+            self.line("Registro: " + str(data.get("name") or data.get("ldhName") or data.get("handle")
+                                         or "respuesta disponible en el reporte")
+                      + (f" · estado: {', '.join(data['status'][:3])}" if isinstance(data.get("status"), list) and data["status"] else ""))
+        elif name == "http":
+            status = data.get("status", "?")
+            color = "32" if str(status).startswith("2") else "36" if str(status).startswith("3") else "33"
+            self.line(f"HTTP: {status} · {data.get('title') or 'sin título'}", color)
+            missing = data.get("missing_headers", [])
+            self.line("Cabeceras recomendadas ausentes: " + (", ".join(missing) if missing else "ninguna de las comprobadas"))
+        elif name == "tls":
+            self.tls_summary(data)
+        elif name == "ports":
+            rows = data.get("results", [])
+            opened = [row.get("port") for row in rows if row.get("state") == "open"]
+            self.line("Puertos TCP accesibles: " + (", ".join(service_label(port) for port in opened)
+                                                    if opened else "ninguno en la lista revisada"),
+                      "32" if opened else None)
+            if rows:
+                self.line(f"Sin respuesta: {len(rows) - len(opened)} de {len(rows)} puertos revisados", "90")
+        elif name == "traceroute":
+            self.line("Ruta de red: " + (data.get("reason", "no disponible") if data.get("status") == "unavailable" else "disponible en el detalle"))
+        elif name == "mikrotik":
+            self.routeros_summary(data)
+        elif name == "asn":
+            groups = {}
+            for row in data.get("networks", []):
+                key = (f"AS{row['asn']} {row.get('as_name') or ''} · {row.get('country') or '?'}".strip()
+                       if row.get("asn") else (row.get("note") or row.get("error") or "sin datos públicos"))
+                groups.setdefault(key, []).append(row)
+            for key, rows in groups.items():
+                ptrs = sorted({r["ptr"] for r in rows if r.get("ptr")})
+                ips = ", ".join(r["ip"] for r in rows[:3]) + (f" y {len(rows) - 3} más" if len(rows) > 3 else "")
+                self.line(f"Red: {key} · {ips}" + (f" · {', '.join(ptrs[:2])}" if ptrs else ""),
+                          None if rows[0].get("asn") else "90")
+        elif name == "mail":
+            color = "1;31" if data.get("spoofable") else "32" if data.get("grade", "").startswith("A") else "33"
+            self.line(f"Correo: nota {data.get('grade')} · "
+                      + ("SE PUEDE SUPLANTAR (DMARC no bloquea correos falsos)" if data.get("spoofable")
+                         else "protegido contra suplantación"), color)
+            spf, dmarc = data.get("spf", {}), data.get("dmarc", {})
+            self.line(f"SPF: {spf.get('all') or ('sin -all' if spf.get('present') else 'ausente')} · DMARC: "
+                      f"{dmarc.get('policy') or 'ausente'} · DKIM: "
+                      + (", ".join(data.get("dkim", {}).get("selectors_found", [])) or "no encontrado")
+                      + f" · MTA-STS: {data.get('mta_sts', {}).get('mode') or 'no'}")
+            if not data.get("accepts_mail"):
+                self.line("El dominio no recibe correo (sin MX o MX nulo).", "90")
+        elif name == "tech":
+            grade = data.get("headers_grade", {})
+            tech = ", ".join(t["name"] for t in data.get("technologies", [])) or "no identificadas"
+            self.line(f"Web: {data.get('status')} · cabeceras de seguridad: nota {grade.get('grade')} ({grade.get('points')}/100)",
+                      "32" if grade.get("grade") in ("A", "B") else "33")
+            self.line("Tecnologías: " + tech + (f" · generador: {data['generator']}" if data.get("generator") else ""))
+            if data.get("favicon"):
+                self.line(f"Favicon: {data['favicon']['shodan']} (búscalo en Shodan para hallar servidores iguales)", "90")
+            extra = []
+            if data.get("security_txt"):
+                extra.append("security.txt publicado")
+            if data.get("redirects"):
+                extra.append(f"{len(data['redirects'])} redirecciones")
+            weak = [c["name"] for c in data.get("cookies", []) if c.get("issues")]
+            if weak:
+                extra.append(f"{len(weak)} cookies sin protecciones")
+            if extra:
+                self.line(" · ".join(extra), "90")
+        elif name == "subdomains":
+            alive = data.get("alive", [])
+            self.line(f"Subdominios: {data.get('total', 0)} encontrados ({', '.join(data.get('sources', [])) or 'sin fuente'})"
+                      f" · {len(alive)} activos", "32" if data.get("total") else None)
+            for row in data.get("takeover", []):
+                risk = row["takeover"]["risk"]
+                self.line(f"[{'TOMA POSIBLE' if risk != 'revisar' else 'REVISAR'}] {row['name']} → {row.get('cname')} · "
+                          f"{row['takeover']['reason']}", "1;31" if risk == "alto" else "33")
+            if data.get("warning"):
+                self.line(data["warning"], "33")
+        elif name == "history":
+            parts = []
+            if data.get("registered"):
+                parts.append(f"registrado el {data['registered']} ({data.get('age_days')} días)")
+            if data.get("expires"):
+                parts.append(f"caduca el {data['expires']}")
+            if data.get("registrar"):
+                parts.append(f"registrador: {data['registrar']}")
+            self.line("Dominio: " + (" · ".join(parts) or "sin fechas de registro públicas"),
+                      "33" if data.get("new_domain") else None)
+            if data.get("new_domain"):
+                self.line("Dominio reciente: es una señal habitual de sitios de phishing.", "33")
+            wb = data.get("wayback") or {}
+            if wb.get("first_capture"):
+                self.line(f"Wayback Machine: primera captura {wb['first_capture']} · última {wb.get('last_capture')}", "90")
+        elif name == "lookalike":
+            rows = data.get("registered", [])
+            self.line(f"Dominios parecidos: {len(rows)} registrados de {data.get('checked')} variantes · "
+                      f"{data.get('with_mail', 0)} reciben correo", "33" if data.get("with_mail") else None)
+            for row in rows[:6]:
+                self.line(f"  {row['domain']} ({row.get('kind')})" + (" · recibe correo" if row.get("mx") else ""),
+                          "33" if row.get("mx") else "90")
 
     def tls_summary(self, data):
+        if data.get("verified") is False:
+            self.line(f"TLS: {data.get('protocol')} · CERTIFICADO NO VÁLIDO: {data.get('verify_error')}", "1;31")
+            if data.get("issuer"):
+                self.line(f"Emitido por {data.get('issuer')} para {data.get('subject')}"
+                          + (" (autofirmado)" if data.get("self_signed") else ""), "90")
+        versions = data.get("versions") or {}
+        if versions:
+            accepted = [v.replace("TLSv", "") for v, ok in versions.items() if ok]
+            old = [v for v in ("TLSv1.0", "TLSv1.1") if versions.get(v)]
+            self.line("Versiones TLS aceptadas: " + (", ".join(accepted) or "ninguna")
+                      + (" · acepta versiones antiguas" if old else ""), "33" if old else "90")
+        if data.get("verified") is False:
+            return
         days, expires = data.get("days_remaining"), data.get("expires")
         when = f"caduca el {expires}" if expires else "fecha de caducidad no disponible"
         if days is not None and days < 0:
@@ -759,6 +890,15 @@ class InteractiveApp:
 
     def details(self, report):
         self.screen("Resultados explicados", str(report.get("meta", {}).get("target", "sin objetivo")))
+        score = report.get("score")
+        if isinstance(score, dict) and score.get("findings"):
+            self.panel(f"HALLAZGOS · NOTA {score.get('grade')} ({score.get('score')}/100)",
+                       [(score.get("note", ""), "90")])
+            for finding in score["findings"]:
+                self.line(f"[{SEVERITY_LABELS[finding['severity']]}] {finding['area']}: {finding['title']}",
+                          SEVERITY_COLORS[finding["severity"]])
+                self.line("    Cómo arreglarlo: " + finding["fix"], "90")
+            self.line()
         for name, module in report.get("modules", {}).items():
             self.panel(MODULE_LABELS.get(name, name).upper(),
                        [(MODULE_HELP.get(name, "Datos de la comprobación."), "90")])
@@ -805,6 +945,39 @@ class InteractiveApp:
                     self.line(f"Ausente: {header} — {explanations.get(header, 'revisa la política del sitio')}")
             elif name == "traceroute" and data.get("output"):
                 self.line(data["output"])
+            elif name == "mail":
+                for issue in data.get("spf", {}).get("issues", []) + data.get("dmarc", {}).get("issues", []):
+                    self.line("• " + issue, "33")
+                if data.get("spf", {}).get("record"):
+                    self.line("SPF: " + data["spf"]["record"], "90")
+                if data.get("dmarc", {}).get("record"):
+                    self.line("DMARC: " + data["dmarc"]["record"], "90")
+                self.line(f"TLS-RPT: {'sí' if data.get('tls_rpt') else 'no'} · BIMI: {'sí' if data.get('bimi') else 'no'}")
+            elif name == "tech":
+                for check in data.get("headers_grade", {}).get("checks", []):
+                    mark = {"ok": "[OK]", "aviso": "[AVISO]", "falta": "[FALTA]"}[check["state"]]
+                    self.line(f"{mark} {check['text']}", {"ok": "32", "aviso": "33", "falta": "33"}[check["state"]])
+                for cookie in data.get("cookies", []):
+                    if cookie.get("issues"):
+                        self.line(f"Cookie {cookie['name']}: " + ", ".join(cookie["issues"]), "90")
+                for hop in data.get("redirects", []):
+                    self.line(f"Redirección {hop['status']} → {hop['location']}", "90")
+                if data.get("robots"):
+                    self.line(f"robots.txt: {data['robots']['disallow']} rutas bloqueadas · "
+                              + (", ".join(data["robots"]["sitemaps"]) or "sin sitemap"), "90")
+            elif name == "subdomains":
+                for row in data.get("alive", [])[:60]:
+                    target = row.get("cname") or ", ".join(row.get("addresses", [])[:2])
+                    self.line(f"{row['name']} → {target}", "90")
+                if len(data.get("alive", [])) > 60:
+                    self.line(f"… y {len(data['alive']) - 60} más en el reporte.", "90")
+                if data.get("note"):
+                    self.line(data["note"], "90")
+            elif name == "lookalike":
+                for row in data.get("registered", []):
+                    self.line(f"{row['domain']} · {row.get('kind')} · {', '.join(row.get('addresses', []))}"
+                              + (" · recibe correo" if row.get("mx") else ""), "33" if row.get("mx") else "90")
+                self.line(data.get("note", ""), "90")
             elif name == "rdap":
                 for key, label in (("handle", "Identificador"), ("name", "Nombre"),
                                    ("country", "País del registro"), ("startAddress", "IP inicial"),

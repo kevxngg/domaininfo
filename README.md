@@ -1,4 +1,4 @@
-# DomainInfo 4.3
+# DomainInfo 5.0
 
 Diagnóstico de dominios e IPs para **Termux, Kali/Linux, macOS y Windows**, por [@kevxngg](https://github.com/kevxngg).
 
@@ -106,15 +106,34 @@ También puedes usar `py -3 domaininfo.py example.com`. El instalador opcional `
 
 ## Funciones portables
 
-| Modo | Funciones |
-|---|---|
-| `quick` (predeterminado) | Resolución IPv4/IPv6 y registro RDAP |
-| `web` | DNS, HTTP, headers y certificado TLS verificado |
-| `ports` | DNS y conexiones TCP concurrentes, sin sockets RAW |
-| `full` | Todos los anteriores y traceroute del sistema, si está disponible |
-| `mikrotik` | RouterOS 6/7: servicios de gestión, versión y avisos de seguridad recientes |
+| Modo | Tecla en el menú | Funciones |
+|---|---|---|
+| `quick` (predeterminado) | 1 | Direcciones, registros DNS (MX, NS, TXT, SOA, CAA, CNAME), DNSSEC y registro RDAP |
+| `web` | 2 | DNS, HTTP, certificado TLS a fondo y huella tecnológica con nota de cabeceras |
+| `ports` | 3 | DNS y conexiones TCP concurrentes, sin sockets RAW |
+| `full` | 4 | Todo lo general: DNS, RDAP, red (ASN), web, TLS, tecnologías, correo, subdominios, historia, puertos y traceroute |
+| `mikrotik` | 5 | RouterOS 6/7: servicios de gestión, versión y avisos de seguridad recientes |
+| `mail` | e | Seguridad del correo: SPF, DMARC, DKIM, MTA-STS, TLS-RPT y BIMI, con nota y si se puede suplantar |
+| `recon` | s | Reconocimiento OSINT: subdominios (Certificate Transparency), posible toma de subdominios, red, tecnologías e historia |
+| `brand` | p | Marca y phishing: dominios parecidos registrados (errores de tecleo, homoglifos, otros TLD) y si reciben correo |
 
-Incluye dominios internacionales (IDNA), archivos batch UTF-8 con BOM/CRLF, eliminación de duplicados, errores por módulo, reportes JSON/TXT/HTML, escritura atómica y nombres únicos. El TXT contiene el mismo documento estructurado que el JSON. Los reportes HTML escapan el contenido remoto.
+### Novedades de la versión 5
+
+Todo sigue funcionando **solo con Python estándar**, sin pip ni root:
+
+- **Cliente DNS propio** (UDP/TCP y DNS sobre HTTPS si el puerto 53 está bloqueado): MX, NS, TXT, SOA, CAA, CNAME, PTR y DNSSEC. Con `--resolver IP` eliges el servidor.
+- **Correo**: nota A–F y aviso claro cuando cualquiera puede enviar correos falsos en nombre del dominio.
+- **TLS a fondo**: versiones aceptadas (avisa si sigue aceptando TLS 1.0/1.1), nombres del certificado y, si no es válido, el motivo (autofirmado, nombre incorrecto, caducado) en vez de un error.
+- **Red**: sistema autónomo, operador, bloque y país de cada IP (Team Cymru por DNS).
+- **Huella del sitio**: tecnologías (CMS, CDN, frameworks, analítica), nota de las cabeceras de seguridad, cookies sin protecciones, redirecciones, `security.txt`, `robots.txt` y el **hash del favicon** listo para buscar en Shodan (`http.favicon.hash:...`).
+- **Subdominios** desde los registros públicos de certificados (crt.sh y Cert Spotter) y, con `--brute`, la lista de palabras; detecta **CNAME abandonados** que podrían permitir tomar el subdominio (GitHub Pages, Heroku, S3, Azure, Shopify, Netlify y más).
+- **Historia**: antigüedad y caducidad del dominio, registrador y primera/última captura en la Wayback Machine. Un dominio de menos de 90 días se marca como reciente.
+- **Dominios parecidos** para proteger una marca contra phishing.
+- **Nota global de seguridad (0–100, A–F)** con cada hallazgo, su gravedad y cómo arreglarlo, en la terminal y en los reportes.
+- **Varios objetivos** (`-f`): además de un reporte por objetivo, un **mapa de infraestructura** (qué objetivos comparten IP, red, DNS, correo, certificado o favicon) y un **resumen CSV**.
+- **Reportes**: HTML con nota, hallazgos y secciones (el JSON completo queda dentro), TXT legible y Markdown con `--format md`.
+
+Incluye dominios internacionales (IDNA), archivos batch UTF-8 con BOM/CRLF, eliminación de duplicados, errores por módulo, reportes JSON/TXT/HTML/MD, escritura atómica y nombres únicos. El JSON conserva la estructura anterior y solo añade campos (`score`, módulos nuevos, `records` en DNS). Los reportes HTML escapan el contenido remoto.
 
 ```bash
 python3 domaininfo.py                          # Menú interactivo
@@ -124,6 +143,10 @@ python3 domaininfo.py -m ports --ports 22,80,443 --timeout 2 -t 8 127.0.0.1
 python3 domaininfo.py -m quick -s rdap ::1
 python3 domaininfo.py -f targets.txt -m web -o logs --format all
 python3 domaininfo.py -m full -s ports -s traceroute example.com
+python3 domaininfo.py -m mail example.com        # ¿Se puede suplantar el correo?
+python3 domaininfo.py -m recon --brute example.com
+python3 domaininfo.py -m brand mimarca.com       # Dominios que imitan tu marca
+python3 domaininfo.py -f dominios.txt -m full    # Reportes + mapa de infraestructura + CSV
 python3 domaininfo.py -q -s rdap localhost      # Solo JSON en stdout
 python3 domaininfo.py --doctor                 # Diagnóstico local sin red
 python3 domaininfo.py --help
@@ -131,7 +154,7 @@ python3 domaininfo.py --help
 
 En Windows sustituye `python3` por `python` o `py -3`.
 
-`-t` limita conexiones TCP a 1–64 trabajadores. `--timeout` limita cada operación de conexión/lectura, entre 0.1 y 60 segundos; la resolución DNS del sistema y las redirecciones no tienen un límite global. `-s` puede repetirse. `--scheme http --web-port 8080` permite inspeccionar un servidor local. Una URL se normaliza a su host; configura protocolo y puerto con estas opciones, ya que la ruta y puerto de la URL no se conservan.
+`-t` limita conexiones TCP y consultas paralelas a 1–64 trabajadores. Los módulos de correo, subdominios, historia y dominios parecidos solo aplican a dominios: con una IP aparecen como omitidos. `--timeout` limita cada operación de conexión/lectura, entre 0.1 y 60 segundos; la resolución DNS del sistema y las redirecciones no tienen un límite global. `-s` puede repetirse. `--scheme http --web-port 8080` permite inspeccionar un servidor local. Una URL se normaliza a su host; configura protocolo y puerto con estas opciones, ya que la ruta y puerto de la URL no se conservan.
 
 ## Uso en la terminal
 

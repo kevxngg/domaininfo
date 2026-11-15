@@ -3,6 +3,7 @@
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+import functools
 from datetime import datetime, timezone
 import html
 import ipaddress
@@ -22,17 +23,27 @@ import time
 from urllib import error, parse, request
 import uuid
 
-VERSION = "4.3.0"
+VERSION = "5.0.0"
 REPO = "kevxngg/domaininfo"
 CERT_WARN_DAYS = 30
-MODULES =("dns", "rdap", "http", "tls", "ports", "traceroute", "mikrotik")
+MODULES = ("dns", "rdap", "asn", "http", "tls", "tech", "mail", "subdomains", "history",
+           "ports", "traceroute", "lookalike", "mikrotik")
 MODES = {
     "quick": ("dns", "rdap"),
-    "web": ("dns", "http", "tls"),
+    "web": ("dns", "http", "tls", "tech"),
     "ports": ("dns", "ports"),
-    "full": tuple(name for name in MODULES if name != "mikrotik"),
+    "full": ("dns", "rdap", "asn", "http", "tls", "tech", "mail", "subdomains", "history", "ports", "traceroute"),
     "mikrotik": ("mikrotik",),
+    "mail": ("dns", "mail"),
+    "recon": ("dns", "rdap", "asn", "tech", "subdomains", "history"),
+    "brand": ("dns", "lookalike"),
 }
+# Modos y módulos que solo tienen sentido con un dominio (no con una IP)
+DOMAIN_ONLY = {"mail", "subdomains", "history", "lookalike"}
+
+
+class NotApplicable(Exception):
+    """El módulo no aplica a este objetivo (por ejemplo, correo de una dirección IP)."""
 DEFAULT_PORTS = (21, 22, 25, 53, 80, 110, 143, 443, 445, 587, 993, 995,
                  3306, 3389, 5432, 6379, 8080, 8443)
 
@@ -91,25 +102,119 @@ def fetch(url, timeout, limit=1024 * 1024):
                 "truncated": len(body) > limit}, body[:limit]
 
 
-def dns_info(target, args):
-    # System resolver supports IPv4/IPv6 and local hosts on every platform.
-    return {"addresses": resolve(target), "resolver": "system",
-            "note": "A/AAAA del resolver del sistema; no incluye MX/TXT/NS"}
-
-
-def rdap_info(target, args):
+def is_ip(target):
     try:
         ipaddress.ip_address(target)
-        kind = "ip"
+        return True
     except ValueError:
-        kind = "domain"
-    meta, body = fetch("https://rdap.org/" + kind + "/" + parse.quote(target, safe=""),
-                       args.timeout)
+        return False
+
+
+def require_domain(target):
+    if is_ip(target) or "." not in target:
+        raise NotApplicable("solo para dominios")
+
+
+def dns_info(target, args):
+    """A/AAAA del sistema y, para dominios, MX, NS, TXT, SOA, CAA, CNAME y DNSSEC con el cliente propio."""
+    import dnsclient
+    result = {"addresses": resolve(target), "resolver": "system"}
+    timeout = min(args.timeout, 5)
+    if is_ip(target):
+        try:
+            result["ptr"] = dnsclient.values(dnsclient.reverse_name(target), "PTR", timeout)
+        except dnsclient.DNSError:
+            result["ptr"] = []
+        return result
+    if dnsclient.is_single_label(target):
+        result["note"] = "Nombre local: solo direcciones del sistema"
+        return result
+    records, errors = {}, []
+
+    def one(kind):
+        try:
+            return kind, dnsclient.values(target, kind, timeout)
+        except dnsclient.DNSError as exc:
+            errors.append(f"{kind}: {exc}")
+            return kind, []
+    with ThreadPoolExecutor(max_workers=7) as pool:
+        for kind, values in pool.map(one, ("NS", "MX", "TXT", "SOA", "CAA", "CNAME", "DS")):
+            records[kind] = values
+    result["dnssec"] = bool(records.pop("DS", []))
+    result["records"] = records
+    result["dns_server"] = ", ".join(dnsclient.system_resolvers())
+    if errors:
+        result["errors"] = errors
+    return result
+
+
+@functools.lru_cache(maxsize=32)
+def _rdap(target, timeout):
+    kind = "ip" if is_ip(target) else "domain"
+    meta, body = fetch("https://rdap.org/" + kind + "/" + parse.quote(target, safe=""), timeout)
     if meta["status"] != 200:
         raise ValueError("RDAP respondió HTTP " + str(meta["status"]))
     if meta["truncated"]:
         raise ValueError("Respuesta RDAP demasiado grande")
-    return json.loads(body)
+    return body
+
+
+def rdap_info(target, args):
+    return json.loads(_rdap(target, args.timeout))
+
+
+def asn_info(target, args):
+    import netinfo
+    addresses = [target] if is_ip(target) else resolve(target)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        networks = list(pool.map(lambda ip: netinfo.lookup(ip, min(args.timeout, 5)), addresses[:8]))
+    return {"networks": networks, "source": "Team Cymru (DNS)"}
+
+
+def mail_info(target, args):
+    require_domain(target)
+    import mailsec
+    return mailsec.audit(target, None, min(args.timeout, 5), fetch)
+
+
+def web_url(target, args):
+    port = args.web_port or (443 if args.scheme == "https" else 80)
+    default = (args.scheme == "https" and port == 443) or (args.scheme == "http" and port == 80)
+    return f"{args.scheme}://{web_host(target)}" + ("" if default else f":{port}") + "/"
+
+
+def tech_info(target, args):
+    import webtech
+    return webtech.audit(web_url(target, args), args.timeout, "Mozilla/5.0 (compatible; DomainInfo/" + VERSION + ")")
+
+
+def subdomains_info(target, args):
+    require_domain(target)
+    import recon
+    return recon.audit(target, args.threads, min(args.timeout, 5), brute=getattr(args, "brute", False))
+
+
+def history_info(target, args):
+    require_domain(target)
+    import history
+    result = {}
+    try:
+        result.update(history.from_rdap(json.loads(_rdap(target, args.timeout))))
+    except (OSError, ValueError) as exc:
+        result["rdap_error"] = str(exc)
+    try:
+        result["wayback"] = history.wayback(target, max(args.timeout, 10))
+    except (OSError, ValueError) as exc:
+        result["wayback"] = {"error": str(exc)}
+    if "rdap_error" in result and "error" in result["wayback"]:
+        raise ValueError("Sin datos de registro ni de Wayback Machine")
+    return result
+
+
+def lookalike_info(target, args):
+    require_domain(target)
+    import lookalike
+    return lookalike.audit(target, args.threads, min(args.timeout, 3))
 
 
 def web_host(target):
@@ -133,17 +238,14 @@ def http_info(target, args):
 
 
 def tls_info(target, args):
+    """Certificado (verificado o, si no lo es, el motivo) y versiones TLS aceptadas."""
+    import tlsdeep
     port = args.web_port or 443
-    context = ssl.create_default_context()
-    with socket.create_connection((target, port), timeout=args.timeout) as raw:
-        with context.wrap_socket(raw, server_hostname=target) as conn:
-            cert = conn.getpeercert()
-            expiry = ssl.cert_time_to_seconds(cert["notAfter"])
-            days = int((expiry - time.time()) // 86400)
-            return {"verified": True, "protocol": conn.version(),
-                    "cipher": conn.cipher(), "certificate": cert,
-                    "expires": datetime.fromtimestamp(expiry, timezone.utc).date().isoformat(),
-                    "days_remaining": days, "expiry_warning": expiry_warning(days)}
+    result = tlsdeep.inspect(target, port, args.timeout)
+    result["expiry_warning"] = expiry_warning(result.get("days_remaining"))
+    if not getattr(args, "no_tls_versions", False):
+        result["versions"] = tlsdeep.versions(target, port, min(args.timeout, 5))
+    return result
 
 
 def expiry_warning(days):
@@ -197,9 +299,10 @@ def mikrotik_info(target, args):
     return routeros.audit(target, args, ports_info)
 
 
-RUNNERS = {"dns": dns_info, "rdap": rdap_info, "http": http_info,
-           "tls": tls_info, "ports": ports_info, "traceroute": trace_info,
-           "mikrotik": mikrotik_info}
+RUNNERS = {"dns": dns_info, "rdap": rdap_info, "asn": asn_info, "http": http_info,
+           "tls": tls_info, "tech": tech_info, "mail": mail_info, "subdomains": subdomains_info,
+           "history": history_info, "ports": ports_info, "traceroute": trace_info,
+           "lookalike": lookalike_info, "mikrotik": mikrotik_info}
 
 
 def scan(target, args, on_progress=None):
@@ -217,6 +320,8 @@ def scan(target, args, on_progress=None):
         try:
             data = RUNNERS[name](target, args)
             report["modules"][name] = {"status": "ok", "data": data}
+        except NotApplicable as exc:
+            report["modules"][name] = {"status": "skipped", "reason": str(exc)}
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
             report["modules"][name] = {"status": "error", "error": str(exc)}
         if on_progress:
@@ -224,6 +329,10 @@ def scan(target, args, on_progress=None):
         # The readable output draws its own progress; JSON mode keeps the classic stderr lines.
         if not args.quiet and not getattr(args, "human", False):
             print(f"[{name}] {report['modules'][name]['status']}", file=sys.stderr)
+    import score
+    assessment = score.assess(report)
+    if assessment:
+        report["score"] = assessment
     return report
 
 
@@ -248,19 +357,30 @@ def save_report(report, directory, formats):
     paths = []
     for fmt in formats:
         path = directory / (stem + "." + fmt)
-        if fmt == "html":
-            content = ("<!doctype html><html lang='es'><meta charset='utf-8'>"
-                       "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-                       "<title>DomainInfo Report</title><style>body{font:16px system-ui;"
-                       "max-width:1000px;margin:2rem auto;padding:1rem;background:#101827;color:#e5e7eb}"
-                       "pre{white-space:pre-wrap;overflow-wrap:anywhere}</style>"
-                       "<h1>DomainInfo: " + html.escape(report["meta"]["target"]) + "</h1><pre>"
-                       + html.escape(serialized) + "</pre></html>")
+        if fmt in ("html", "txt", "md"):
+            import render
+            content = {"html": render.to_html, "txt": render.to_text, "md": render.to_markdown}[fmt](
+                sys.modules[__name__], report, serialized)
         else:
             content = serialized + "\n"
         atomic_write(path, content)
         paths.append(str(path))
     return paths
+
+
+def save_batch(reports, directory):
+    """Mapa de infraestructura (JSON/MD) y resumen CSV de varios objetivos."""
+    import infra
+    directory.mkdir(parents=True, exist_ok=True)
+    stem = f"domaininfo_lote_{datetime.now(timezone.utc):%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:6]}"
+    result = infra.correlate(reports)
+    paths = []
+    for suffix, content in ((".csv", infra.to_csv(reports)), ("_mapa.md", infra.map_markdown(result)),
+                            ("_mapa.json", json.dumps(result, ensure_ascii=False, indent=2) + "\n")):
+        path = directory / (stem + suffix)
+        atomic_write(path, content)
+        paths.append(str(path))
+    return result, paths
 
 
 def bounded_int(low, high):
@@ -350,12 +470,18 @@ def parser():
                        help="archivo UTF-8 con un objetivo por línea (# para comentarios)")
     audit.add_argument("-s", "--skip", choices=MODULES, action="append", default=[], metavar="MÓDULO",
                        help="omite un módulo; se puede repetir: " + ", ".join(MODULES))
+    audit.add_argument("--brute", action="store_true",
+                       help="subdominios: además de los certificados, probar la lista de palabras")
+    audit.add_argument("--no-tls-versions", action="store_true",
+                       help="TLS: no comprobar qué versiones acepta el servidor (más rápido)")
     audit.add_argument("--watch", type=bounded_int(5, 86400), metavar="SEGUNDOS",
                        help="repite la revisión cada N segundos y avisa solo de los cambios (CTRL+C para salir)")
 
     network = cli.add_argument_group("red")
     network.add_argument("-t", "--threads", type=bounded_int(1, 64), default=15, metavar="N",
                          help="conexiones TCP simultáneas, 1-64 (por defecto: %(default)s)")
+    network.add_argument("--resolver", metavar="IP",
+                         help="servidor DNS para MX/TXT/NS (por defecto el del sistema; si no responde, DNS sobre HTTPS)")
     network.add_argument("--timeout", type=timeout_value, default=5.0, metavar="SEG",
                          help="espera máxima por conexión, 0.1-60 s (por defecto: %(default)s)")
     network.add_argument("--ports", type=port_list, metavar="LISTA",
@@ -381,7 +507,7 @@ def parser():
                         help="solo JSON en stdout, sin progreso")
     output.add_argument("-o", "--output", type=Path, default=Path("logs"), metavar="CARPETA",
                         help="carpeta de reportes (por defecto: %(default)s)")
-    output.add_argument("--format", choices=("json", "txt", "html", "all"), default="all",
+    output.add_argument("--format", choices=("json", "txt", "html", "md", "all"), default="all",
                         help="formatos de reporte que se guardan (por defecto: %(default)s)")
     output.add_argument("--open", action="store_true", help="abre el reporte HTML al terminar")
     output.add_argument("-v", "--verbose", action="store_true",
@@ -447,13 +573,29 @@ def fingerprint(report):
                                             if row.get("state") == "open")
         elif name == "mikrotik":
             facts["mikrotik.version"] = data.get("version")
+        elif name == "mail":
+            facts["mail.grade"] = data.get("grade")
+            facts["mail.dmarc"] = (data.get("dmarc") or {}).get("policy")
+        elif name == "subdomains":
+            facts["subdomains.alive"] = len(data.get("alive", []))
+            facts["subdomains.takeover"] = ", ".join(r["name"] for r in data.get("takeover", []))
+        elif name == "tech":
+            facts["tech.list"] = ", ".join(t["name"] for t in data.get("technologies", []))
+        elif name == "lookalike":
+            facts["lookalike.registered"] = ", ".join(r["domain"] for r in data.get("registered", []))
+    if isinstance(report.get("score"), dict):
+        facts["score.grade"] = report["score"].get("grade")
     return facts
 
 
 FACT_LABELS = {"dns.addresses": "Direcciones", "http.status": "Estado HTTP",
                "http.missing_headers": "Cabeceras ausentes", "tls.expires": "Caducidad del certificado",
                "tls.serial": "Número de serie del certificado", "tls.protocol": "Protocolo TLS",
-               "ports.open": "Puertos abiertos", "mikrotik.version": "Versión RouterOS"}
+               "ports.open": "Puertos abiertos", "mikrotik.version": "Versión RouterOS",
+               "mail.grade": "Nota del correo", "mail.dmarc": "Política DMARC",
+               "subdomains.alive": "Subdominios activos", "subdomains.takeover": "Subdominios con posible toma",
+               "tech.list": "Tecnologías", "lookalike.registered": "Dominios parecidos registrados",
+               "score.grade": "Nota de seguridad"}
 
 
 def describe_changes(before, after):
@@ -491,6 +633,17 @@ def run_targets(targets, args, view):
             open_html(paths)
         failed |= any(module["status"] == "error" for module in report["modules"].values())
         reports.append(report)
+    if len(reports) > 1:
+        try:
+            result, paths = save_batch(reports, args.output)
+            message = (f"Lote: {len(result['groups'])} elementos compartidos entre objetivos · "
+                       + ", ".join(paths))
+            if view:
+                view.note(message)
+            elif args.verbose:
+                print(message, file=sys.stderr)
+        except OSError as exc:
+            print(f"No se pudo guardar el resumen del lote: {exc}", file=sys.stderr)
     return failed, reports
 
 
@@ -538,6 +691,12 @@ def main(argv=None):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     cli = parser()
     args = cli.parse_args(argv)
+    if args.resolver:
+        try:
+            os.environ["DOMAININFO_RESOLVER"] = ",".join(str(ipaddress.ip_address(item.strip()))
+                                                         for item in args.resolver.split(","))
+        except ValueError:
+            cli.error("--resolver debe ser una o varias IP separadas por comas")
     if args.completion:
         from completions import script
         print(script(args.completion, cli))
