@@ -1,51 +1,51 @@
-# Auditoría RouterOS
+# RouterOS audit
 
-Autor: Kevin (@kevxngg). Revisión del catálogo: **2026-10-26**.
+Author: Kevin (@kevxngg). Catalog review: **2026-10-26**.
 
-Para usar el asistente de la versión 4.2, ejecuta `python3 domaininfo.py`, elige **5 · MikroTik / RouterOS**, y selecciona revisión de un equipo o revisión sin conexión. El asistente permite volver atrás, ajustar puertos y leer un resumen de los avisos antes de consultar el reporte completo.
+To use the version 4.2 wizard, run `python3 domaininfo.py`, choose **5 · MikroTik / RouterOS**, and select either a device review or an offline review. The wizard lets you go back, adjust ports and read a summary of the advisories before opening the full report.
 
-## Fuentes y alcance
+## Sources and scope
 
-Se contrastaron los rangos del [aviso de CERT Polska](https://cert.pl/en/posts/2026/09/mikrotik-routeros-cve/) con la [publicación de MikroTik actualizada en octubre](https://mikrotik.com/supportsec/september-2026-vulnerability/). El catálogo contiene estos seis avisos:
+The ranges in the [CERT Polska advisory](https://cert.pl/en/posts/2026/09/mikrotik-routeros-cve/) were cross-checked against the [MikroTik publication updated in October](https://mikrotik.com/supportsec/september-2026-vulnerability/). The catalog contains these six advisories:
 
-| Aviso | Componente |
+| Advisory | Component |
 |---|---|
-| CVE-2026-67276 | Autenticación SSH |
+| CVE-2026-67276 | SSH authentication |
 | CVE-2026-67277 | Bandwidth-test |
-| CVE-2026-67278 | Certificados y claves de host |
-| CVE-2026-67279 | Canales SSH |
+| CVE-2026-67278 | Certificates and host keys |
+| CVE-2026-67279 | SSH channels |
 | CVE-2026-67281 | WebFig |
-| CVE-2026-86060 | Usuarios SSH |
+| CVE-2026-86060 | SSH users |
 
-Los rangos exactos se conservan por aviso en `routeros.py` y se incluyen en cada reporte. Se usan los intervalos del investigador que publicó el aviso; no se extiende una afectación a toda una rama a partir de un resumen general. Por ejemplo, el aviso de WebFig comienza en 7.20 y el de validación de claves SSH en 7.9 según CERT Polska.
+The exact ranges are kept per advisory in `routeros.py` and included in every report. The intervals from the researcher who published the advisory are used; an impact is never extended to a whole branch based on a general summary. For example, according to CERT Polska the WebFig advisory starts at 7.20 and the SSH key validation advisory at 7.9.
 
-El parche completo de certificados está en **7.24.3** y **7.23.6**: **7.24.2**, **7.23.4** y **7.23.5** conservan un aviso potencial en este catálogo. RouterOS 6 queda fuera de ese aviso específico. Los demás límites se evalúan por separado.
+The complete certificate fix is in **7.24.3** and **7.23.6**: **7.24.2**, **7.23.4** and **7.23.5** keep a potential advisory in this catalog. RouterOS 6 is outside that specific advisory. The other limits are evaluated separately.
 
-La instantánea de versiones de referencia procede del [changelog oficial](https://mikrotik.com/download/changelogs): stable 7.25, long-term 7.23.8 y rama 6 en 6.49.23. Una versión anterior a stable no implica que deba cambiarse automáticamente desde long-term. Verifica arquitectura, canal, compatibilidad y política de actualización de tu equipo. Este catálogo no se actualiza solo y no cubre todos los CVEs históricos o futuros.
+The snapshot of reference versions comes from the [official changelog](https://mikrotik.com/download/changelogs): stable 7.25, long-term 7.23.8 and the 6 branch at 6.49.23. A version older than stable does not mean you must automatically move away from long-term. Check your device's architecture, channel, compatibility and update policy. This catalog does not update itself and does not cover every historical or future CVE.
 
-## Cómo se obtiene la evidencia
+## How the evidence is gathered
 
-- Sin `--offline`, se prueban conexiones TCP a una lista limitada de servicios de gestión. `--ports` sustituye esa lista.
-- Se lee el banner inicial SSH sin enviar credenciales y la página pública de inicio HTTP/HTTPS. No se sigue ninguna redirección. HTTPS conserva la verificación de certificados.
-- Un número de protocolo SSH o una versión de otro servidor no se interpreta como RouterOS: se exige una marca RouterOS próxima a la versión.
-- `--routeros-version` permite usar una versión de tu inventario; se registra como `user_supplied`. Una versión de banner se registra como `public_banner` y no es una identidad autenticada.
-- Versiones contradictorias fuerzan revisión manual. Versiones desconocidas, beta/rc o ramas distintas de 6/7 no producen una conclusión de parche aplicado.
-- `--web-port` y `--scheme` definen un puerto web personalizado; `--ssh-port` define el puerto del banner SSH. Incluye esos puertos en `--ports` si proporcionas una lista propia.
+- Without `--offline`, TCP connections are attempted to a limited list of management services. `--ports` replaces that list.
+- The initial SSH banner is read without sending credentials, along with the public HTTP/HTTPS landing page. No redirect is followed. HTTPS keeps certificate verification.
+- An SSH protocol number or another server's version is not interpreted as RouterOS: a RouterOS marker close to the version is required.
+- `--routeros-version` lets you use a version from your inventory; it is recorded as `user_supplied`. A banner version is recorded as `public_banner` and is not an authenticated identity.
+- Contradictory versions force a manual review. Unknown versions, beta/rc builds or branches other than 6/7 never produce a "patch applied" conclusion.
+- `--web-port` and `--scheme` set a custom web port; `--ssh-port` sets the SSH banner port. Include those ports in `--ports` if you provide your own list.
 
-El modo `--offline` requiere una versión, no acepta objetivos ni batch y no resuelve DNS, escanea puertos o consulta servicios externos.
+`--offline` mode requires a version, does not accept targets or batch input, and does not resolve DNS, scan ports or query external services.
 
-## Interpretación del reporte
+## Reading the report
 
-| Estado del aviso | Significado |
+| Advisory status | Meaning |
 |---|---|
-| `potentially_affected` | La versión indicada está en un intervalo afectado del catálogo |
-| `not_in_affected_range` | La versión queda fuera de los intervalos de ese aviso |
-| `unknown_version` | Falta una versión para comparar |
-| `manual_review` | Rama/beta/rc no evaluada o evidencia contradictoria |
+| `potentially_affected` | The given version is inside an affected interval in the catalog |
+| `not_in_affected_range` | The version is outside that advisory's intervals |
+| `unknown_version` | A version to compare against is missing |
+| `manual_review` | Unevaluated branch/beta/rc or contradictory evidence |
 
-`confirmed` permanece en `false`: no se intenta explotar el fallo. La exposición de puertos se informa por separado; un puerto cerrado o movido no elimina la aplicabilidad de un aviso por versión. Las comprobaciones no validan firewall, VLAN, permisos de usuarios, estado Flagged ni configuración interna; esas revisiones aparecen como recomendaciones para el administrador.
+`confirmed` stays `false`: no attempt is made to exploit the flaw. Port exposure is reported separately; a closed or moved port does not remove the applicability of a version-based advisory. The checks do not validate firewall, VLANs, user permissions, Flagged state or internal configuration; those reviews appear as recommendations for the administrator.
 
-## Ejemplos
+## Examples
 
 ```bash
 python3 domaininfo.py -m mikrotik --offline --routeros-version 7.24.2
@@ -54,4 +54,4 @@ python3 domaininfo.py -m mikrotik --routeros-version 7.23.8 192.168.88.1
 bash domaininfo.sh --mikrotik --offline --routeros-version 7.25
 ```
 
-En Windows usa `python` o `py -3`. En Termux funciona con Python sin root. La validación automática usa un servidor local simulado y cubre límites de parches, versiones contradictorias, ausencia de versión, puertos personalizados y ausencia de conexiones en modo offline; no sustituye una prueba en hardware MikroTik real.
+On Windows use `python` or `py -3`. On Termux it works with Python without root. The automated validation uses a simulated local server and covers patch boundaries, contradictory versions, a missing version, custom ports and the absence of connections in offline mode; it does not replace a test on real MikroTik hardware.

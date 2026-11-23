@@ -20,9 +20,9 @@ warn()    { echo -e "  ${Y}[!]${NC} $1"; }
 info()    { echo -e "  ${DIM}ℹ  $1${NC}"; }
 
 module_traceroute() {
-    header "8 ▸ TRACEROUTE — RUTA DE RED"
+    header "8 ▸ TRACEROUTE — NETWORK PATH"
     local target="${IP:-$TARGET}"
-    warn "Ejecutando traceroute (15 saltos máx, puede tardar 20-30s)..."
+    warn "Running traceroute (15 hops max, may take 20-30s)..."
     echo ""
 
     if command -v traceroute &>/dev/null; then
@@ -34,14 +34,14 @@ module_traceroute() {
             echo -e "  ${DIM}$line${NC}"
         done
     else
-        info "traceroute/tracepath no disponible en este sistema"
+        info "traceroute/tracepath not available on this system"
         if command -v python3 &>/dev/null; then
             section "Traceroute Python (ICMP/TTL)"
-            python3 "$SCRIPT_DIR/traceroute.py" "$target" 2>/dev/null || info "Script Python no disponible"
+            python3 "$SCRIPT_DIR/traceroute.py" "$target" 2>/dev/null || info "Python script not available"
         fi
     fi
 }
 
 # ════════════════════════════════════════════════════════════════════
-# MÓDULO: EXTRA — ROBOTS, SITEMAP, EMAILS
+# MODULE: EXTRA — ROBOTS, SITEMAP, EMAILS
 # ════════════════════════════════════════════════════════════════════

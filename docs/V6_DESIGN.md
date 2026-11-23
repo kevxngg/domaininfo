@@ -1,118 +1,118 @@
-# DomainInfo 6.0 Security Suite — diseño y hoja de ruta
+# DomainInfo 6.0 Security Suite — design and roadmap
 
-Estado: **Fase 1 implementada** en la rama `feature/v6-fase1-webapp`. Las fases 2–4 son plan, no código.
+Status: **all four phases are being implemented in 6.0** on the `feature/v6-fase1-webapp` branch. Phase 1 is implemented; phases 2–4 are in progress.
 
-## 1. Punto de partida (DomainInfo 5.0)
+## 1. Starting point (DomainInfo 5.0)
 
-- Núcleo Python solo con biblioteca estándar: `domaininfo.py` (CLI, `scan()`, `RUNNERS`, `MODES`),
-  menú propio (`terminal_ui.py`), módulos por archivo (`dnsclient`, `mailsec`, `webtech`, `tlsdeep`,
+- Python core using only the standard library: `domaininfo.py` (CLI, `scan()`, `RUNNERS`, `MODES`),
+  its own menu (`terminal_ui.py`), one module per file (`dnsclient`, `mailsec`, `webtech`, `tlsdeep`,
   `recon`, `history`, `lookalike`, `netinfo`, `score`, `infra`, `render`, `routeros`).
-- Módulos Bash clásicos en `modules/` (incluido `webapp.sh`), lanzados desde el menú (tecla `a`).
-- 108 pruebas `unittest` sin red; CI en Windows/Linux/macOS × Python 3.10/3.12/3.14.
+- Classic Bash modules in `modules/` (including `webapp.sh`), launched from the menu (key `a`).
+- 108 `unittest` tests without network access; CI on Windows/Linux/macOS × Python 3.10/3.12/3.14.
 
-Deuda técnica detectada:
+Technical debt found:
 
-| Problema | Consecuencia | Fase 1 |
+| Problem | Consequence | Phase 1 |
 |---|---|---|
-| `normalize_target()` reduce cualquier URL a su host | `/login` se audita como `/` | `safety.normalize_url()` conserva ruta y consulta |
-| `urllib` sigue redirecciones sin control de destino | SSRF/redirecciones fuera de alcance | cliente HTTP propio con alcance y redirecciones manuales |
-| Resolución DNS repetida en cada conexión | DNS rebinding entre peticiones | IP fijada por host durante toda la auditoría |
-| `score.py` mezcla riesgo y falta de datos | Notas no comparables | `assessment` con Security / Coverage / Confidence |
-| Hallazgos sin evidencia ni estado | Heurísticas parecen vulnerabilidades | modelo `evidence.Finding` con estado y confianza |
-| Cabeceras evaluadas en dos sitios (`http_info`, `webtech`) | Duplicación | `webapp` reutiliza `webtech.grade_headers` y añade análisis profundo de CSP |
+| `normalize_target()` reduces any URL to its host | `/login` is audited as `/` | `safety.normalize_url()` keeps the path and query |
+| `urllib` follows redirects without checking the destination | SSRF/out-of-scope redirects | Own HTTP client with scope and manual redirects |
+| DNS resolved again on every connection | DNS rebinding between requests | IP pinned per host for the whole audit |
+| `score.py` mixes risk with missing data | Grades are not comparable | `assessment` with Security / Coverage / Confidence |
+| Findings without evidence or status | Heuristics look like vulnerabilities | `evidence.Finding` model with status and confidence |
+| Headers evaluated in two places (`http_info`, `webtech`) | Duplication | `webapp` reuses `webtech.grade_headers` and adds deep CSP analysis |
 
-## 2. Arquitectura
+## 2. Architecture
 
 ```
-domaininfo.py ── RUNNERS ──► dns, http, tls, tech, … (5.0, sin cambios)
-                         └─► webapp ──► webapp.py ──► safety.py (URL, alcance, IP fijada, cliente HTTP)
-                                                  └─► evidence.py (Finding, redacción, puntuaciones)
-score.py ──► nota clásica (sin cambios de esquema) + hallazgos webapp confirmados/probables
-evidence.assess() ──► report["assessment"] (campo nuevo)
-tools.py ──► detección de herramientas externas (--doctor → "integrations")
+domaininfo.py ── RUNNERS ──► dns, http, tls, tech, … (5.0, unchanged)
+                         └─► webapp ──► webapp.py ──► safety.py (URL, scope, pinned IP, HTTP client)
+                                                  └─► evidence.py (Finding, redaction, scores)
+score.py ──► classic grade (no schema changes) + confirmed/likely webapp findings
+evidence.assess() ──► report["assessment"] (new field)
+tools.py ──► external tool detection (--doctor → "integrations")
 ```
 
-Principios: núcleo stdlib; los adaptadores de herramientas externas solo detectan, comprueban
-versión y se desactivan si faltan; los módulos activos se añadirán deshabilitados por defecto.
+Principles: stdlib core; external tool adapters only detect, check the version and turn themselves
+off when missing; active modules will be added disabled by default.
 
-### Seguridad de la propia herramienta (Fase 1)
+### Security of the tool itself (Phase 1)
 
-- **URL**: solo `http`/`https`, sin credenciales, sin caracteres de control, puerto 1–65535, sin fragmento.
-- **Alcance**: el host de la URL y los de `--scope` (admite `*.dominio`). Una redirección fuera de alcance
-  no se sigue: queda registrada como bloqueada.
-- **SSRF / rebinding**: cada host se resuelve una vez y la conexión va a esa IP (Host y SNI con el nombre).
-  Siempre se bloquean enlace local (incluido `169.254.169.254`), multicast, no especificadas y reservadas.
-  Las direcciones no públicas (privadas, loopback, CGNAT…) solo se permiten si el objetivo inicial
-  ya lo era (lo escribió el usuario) o con `--allow-private`.
-- **Recursos**: tiempo por conexión, 5 redirecciones máximas, 1 MiB por respuesta, solo GET,
-  sin cookies reenviadas, nunca se envía un formulario.
-- **Secretos**: valores de cookies, tokens CSRF y fragmentos de claves se redactan antes de entrar
-  en el reporte (`evidence.redact`); los parámetros sensibles de las URL (`code`, `token`, `sid`, `key`…)
-  se ocultan (`evidence.redact_url`) y se eliminan los caracteres de control del contenido remoto.
+- **URL**: only `http`/`https`, no credentials, no control characters, port 1–65535, no fragment.
+- **Scope**: the URL's host and those given with `--scope` (accepts `*.domain`). A redirect out of scope
+  is not followed: it is recorded as blocked.
+- **SSRF / rebinding**: each host is resolved once and the connection goes to that IP (Host and SNI carry the name).
+  Link-local (including `169.254.169.254`), multicast, unspecified and reserved addresses are always blocked.
+  Non-public addresses (private, loopback, CGNAT…) are only allowed if the initial target
+  already was one (the user typed it) or with `--allow-private`.
+- **Resources**: per-connection timeout, at most 5 redirects, 1 MiB per response, GET only,
+  no forwarded cookies, a form is never submitted.
+- **Secrets**: cookie values, CSRF tokens and key fragments are redacted before they enter
+  the report (`evidence.redact`); sensitive URL parameters (`code`, `token`, `sid`, `key`…)
+  are hidden (`evidence.redact_url`) and control characters are stripped from remote content.
 
-### Revisión de seguridad independiente (Fase 1)
+### Independent security review (Phase 1)
 
-Una revisión sin acceso a las conclusiones del autor encontró, y se corrigieron con pruebas de regresión
+A review without access to the author's conclusions found the following, and they were fixed with regression tests
 (`tests/test_webapp.py::HostileServerTests`):
 
-| Problema | Corrección |
+| Problem | Fix |
 |---|---|
-| ReDoS en la firma de trazas de Node.js con 1 MB de saltos de línea | Patrón acotado y firmas limitadas a 256 KiB |
-| Sin plazo total (servidor que envía byte a byte) | Plazo por auditoría y lectura por trozos |
-| Parámetros secretos en URL, redirecciones y `action` sin ocultar; JSON con comillas | `redact_url`, nombres ampliados, comillas admitidas |
-| `charset=undefined` y `max-age` gigante abortaban el módulo | Se capturan y se acota `max-age` |
-| `shutil.which` en Windows (< 3.12) ejecutaría un binario plantado en la carpeta actual | Se ignoran rutas en la carpeta actual |
-| Secuencias ANSI del objetivo en terminal/TXT | Se eliminan caracteres de control |
-| NAT64 / 6to4 hacia `169.254.169.254` | Se clasifica la IPv4 incrustada |
-| Origen con IP pública y privada habilitaba la red interna | Solo si todas sus IP son internas |
-| Enlaces Markdown inyectados por títulos remotos | Escape de Markdown |
+| ReDoS in the Node.js stack trace signature with 1 MB of line breaks | Bounded pattern and signatures limited to 256 KiB |
+| No overall deadline (server sending byte by byte) | Per-audit deadline and chunked reads |
+| Secret parameters in URLs, redirects and `action` not hidden; quoted JSON | `redact_url`, extended names, quotes accepted |
+| `charset=undefined` and a huge `max-age` aborted the module | They are caught and `max-age` is bounded |
+| `shutil.which` on Windows (< 3.12) would run a binary planted in the current folder | Paths in the current folder are ignored |
+| ANSI sequences from the target in the terminal/TXT | Control characters are stripped |
+| NAT64 / 6to4 towards `169.254.169.254` | The embedded IPv4 is classified |
+| An origin with both a public and a private IP enabled the internal network | Only if all of its IPs are internal |
+| Markdown links injected through remote titles | Markdown escaping |
 
-La verificación manual contra `python -m http.server` descubrió además que `http.client` suelta el socket
-tras `getresponse()` cuando hay `Content-Length`; el servidor de pruebas ahora envía `Content-Length`.
+Manual verification against `python -m http.server` also found that `http.client` drops the socket
+after `getresponse()` when there is a `Content-Length`; the test server now sends `Content-Length`.
 
-## 3. Modelo de hallazgo
+## 3. Finding model
 
 `id, target, path, category, title, severity, status, confidence, evidence, tool, impact,
 verification, recommendation, references`.
 
-Estados: `confirmado`, `probable`, `informativo`, `pendiente`, `no_aplicable`, `no_evaluado`, `error`.
-Solo `confirmado` (evidencia directa en la respuesta) y `probable` restan en la Security Score;
-`pendiente` significa “no hay evidencia en ningún sentido”, p. ej. un formulario sin token CSRF visible
-y sin cookies SameSite: **no** se declara vulnerable.
+Statuses: `confirmed`, `likely`, `informational`, `pending`, `not_applicable`, `not_evaluated`, `error`.
+Only `confirmed` (direct evidence in the response) and `likely` lower the Security Score;
+`pending` means "there is no evidence either way", e.g. a form without a visible CSRF token
+and without SameSite cookies: it is **not** declared vulnerable.
 
-Puntuaciones (`report["assessment"]`):
-- **security**: 100 − penalizaciones (probable cuenta la mitad).
-- **coverage**: comprobaciones ejecutadas / comprobaciones aplicables.
-- **confidence**: comprobaciones con evidencia directa / comprobaciones ejecutadas.
-- `evidence.comparable(a, b)`: dos auditorías solo se comparan si cubren las mismas comprobaciones y su
-  cobertura difiere ≤ 10 puntos.
+Scores (`report["assessment"]`):
+- **security**: 100 − penalties (likely counts half).
+- **coverage**: checks run / applicable checks.
+- **confidence**: checks with direct evidence / checks run.
+- `evidence.comparable(a, b)`: two audits are only compared if they cover the same checks and their
+  coverage differs by ≤ 10 points.
 
-`report["score"]` (nota A–F de 5.0) se mantiene con el mismo esquema.
+`report["score"]` (the 5.0 A–F grade) keeps the same schema.
 
-## 4. Hoja de ruta
+## 4. Roadmap
 
-| Fase | Contenido | Estado |
+| Phase | Content | Status |
 |---|---|---|
-| 1 — Base sólida | URL completa, `webapp` pasivo, formularios/CSRF, cookies, CSP, CORS, errores, secretos expuestos, modelo de evidencias, nueva puntuación, política de alcance, detección de herramientas | **Hecha** |
-| 2 — Seguridad avanzada | Sesiones con cuentas de prueba (fichero de autorización + límites), ZAP pasivo, Playwright opcional, análisis de OpenAPI, inventario de servicios | Plan |
-| 3 — Integraciones | Ejecutores para Nmap, Nuclei, SSLyze, testssl.sh, Subfinder, httpx…; OSV/NVD/KEV con caché; correlación CVE por versión; historial y comparaciones | Plan |
-| 4 — Security Center | FastAPI opcional en 127.0.0.1 con token, SQLite, dashboard React+TS, PDF/CSV, empaquetado | Plan |
+| 1 — Solid foundation | Full URL, passive `webapp`, forms/CSRF, cookies, CSP, CORS, errors, exposed secrets, evidence model, new scoring, scope policy, tool detection | **Done** |
+| 2 — Advanced security | Sessions with test accounts (authorization file + limits), passive ZAP, optional Playwright, OpenAPI analysis, service inventory | In progress (6.0) |
+| 3 — Integrations | Runners for Nmap, Nuclei, SSLyze, testssl.sh, Subfinder, httpx…; OSV/NVD/KEV with cache; version-based CVE correlation; history and comparisons | In progress (6.0) |
+| 4 — Security Center | Optional FastAPI on 127.0.0.1 with a token, SQLite, React+TS dashboard, PDF/CSV, packaging | In progress (6.0) |
 
-### Decisiones para fases siguientes
+### Decisions for the following phases
 
-- Las ejecuciones de herramientas externas usarán `subprocess.run([...], shell=False, timeout=…)`
-  con argumentos construidos a partir de objetos validados (`safety.normalize_url`), nunca cadenas.
-- La auditoría autenticada exigirá un archivo de autorización (`scope.toml`) con objetivos, cuentas
-  de prueba por referencia a variables de entorno, ventana horaria y límite de peticiones.
-- El dashboard escuchará solo en loopback y exigirá un token aleatorio por sesión.
+- External tool runs will use `subprocess.run([...], shell=False, timeout=…)`
+  with arguments built from validated objects (`safety.normalize_url`), never strings.
+- Authenticated auditing will require an authorization file (`scope.toml`) with targets, test
+  accounts referenced through environment variables, a time window and a request limit.
+- The dashboard will listen on loopback only and require a random per-session token.
 
-## 5. Plan de implementación de la Fase 1 (TDD)
+## 5. Phase 1 implementation plan (TDD)
 
-1. Pruebas de `safety`: URL con ruta/consulta/puerto, rechazo de credenciales y esquemas, alcance con comodín,
-   clasificación de IP y rebinding con un resolvedor simulado.
-2. Pruebas de `evidence`: redacción, estados válidos, ids estables, puntuaciones y comparabilidad.
-3. Pruebas de `webapp` contra un servidor HTTP local (hilo): raíz frente a `/login`, formularios, CSRF directo /
-   alternativo / pendiente, cookies, redirecciones dentro y fuera de alcance, errores técnicos, secretos, CORS.
-4. Pruebas de CLI: `-m webapp --url …/login` conserva la ruta y el JSON público sigue igual.
-5. Implementación mínima para pasar cada bloque; integración en menú, reportes y `--doctor`.
-6. Revisión de seguridad, ruff/bandit/pyright y suite completa.
+1. `safety` tests: URL with path/query/port, rejection of credentials and schemes, wildcard scope,
+   IP classification and rebinding with a simulated resolver.
+2. `evidence` tests: redaction, valid statuses, stable ids, scores and comparability.
+3. `webapp` tests against a local HTTP server (thread): root versus `/login`, forms, direct /
+   alternative / pending CSRF, cookies, in-scope and out-of-scope redirects, technical errors, secrets, CORS.
+4. CLI tests: `-m webapp --url …/login` keeps the path and the public JSON stays the same.
+5. Minimal implementation to pass each block; integration into the menu, reports and `--doctor`.
+6. Security review, ruff/bandit/pyright and the full suite.

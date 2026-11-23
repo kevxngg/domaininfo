@@ -43,12 +43,26 @@ def language():
     return env if env in SUPPORTED else "en"
 
 
+class Text(str):
+    """A translated string that remembers its English ``source`` (used for language-independent ids)."""
+
+    source = ""
+
+
 def tr(text, **values):
     """Translate ``text`` into the current language and fill ``{placeholders}`` from ``values``."""
+    source = text.format(**values) if values else text
     lang = language()
     if lang != "en":
         text = _catalog(lang).get(text, text)
-    return text.format(**values) if values else text
+    result = Text(text.format(**values) if values else text)
+    result.source = source
+    return result
+
+
+def source(text):
+    """English form of a string produced by ``tr()`` (the string itself otherwise)."""
+    return getattr(text, "source", None) or str(text)
 
 
 def catalog_problems(lang="es"):

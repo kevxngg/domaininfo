@@ -1,5 +1,8 @@
-"""Huella del sitio web: tecnologías, cabeceras de seguridad con nota, cookies,
-redirecciones, security.txt, robots.txt y hash del favicon (para buscarlo en Shodan).
+"""Website fingerprint: technologies, graded security headers, cookies, redirects,
+security.txt, robots.txt and the favicon hash (to look it up on Shodan).
+
+Header checks carry a stable ``id`` and a ``state`` of ``ok``, ``missing`` or ``warning``;
+``text`` is written in the active language.
 """
 
 import base64
@@ -7,7 +10,9 @@ import html
 import re
 from urllib import error, parse, request
 
-# (nombre, categoría, dónde buscar, expresión)
+from i18n import tr
+
+# (name, category, where to look, pattern)
 RULES = (
     ("Cloudflare", "CDN", "header", r"^cf-ray:|^server: cloudflare"),
     ("Akamai", "CDN", "header", r"^x-akamai|^server: akamai"),
@@ -16,43 +21,43 @@ RULES = (
     ("Vercel", "Hosting", "header", r"^x-vercel-id:|^server: vercel"),
     ("Netlify", "Hosting", "header", r"^x-nf-request-id:|^server: netlify"),
     ("GitHub Pages", "Hosting", "header", r"^server: github\.com"),
-    ("Nginx", "Servidor web", "header", r"^server: nginx"),
-    ("Apache", "Servidor web", "header", r"^server: apache"),
-    ("Microsoft IIS", "Servidor web", "header", r"^server: microsoft-iis"),
-    ("LiteSpeed", "Servidor web", "header", r"^server: litespeed"),
-    ("Caddy", "Servidor web", "header", r"^server: caddy"),
-    ("PHP", "Lenguaje", "header", r"^x-powered-by: php|phpsessid"),
+    ("Nginx", "Web server", "header", r"^server: nginx"),
+    ("Apache", "Web server", "header", r"^server: apache"),
+    ("Microsoft IIS", "Web server", "header", r"^server: microsoft-iis"),
+    ("LiteSpeed", "Web server", "header", r"^server: litespeed"),
+    ("Caddy", "Web server", "header", r"^server: caddy"),
+    ("PHP", "Language", "header", r"^x-powered-by: php|phpsessid"),
     ("ASP.NET", "Framework", "header", r"^x-aspnet-version:|^x-powered-by: asp\.net|asp\.net_sessionid"),
     ("Express", "Framework", "header", r"^x-powered-by: express"),
     ("WordPress", "CMS", "body", r"/wp-content/|/wp-includes/|<meta name=\"generator\" content=\"wordpress"),
     ("Drupal", "CMS", "body", r"drupal-settings-json|/sites/default/files/|content=\"drupal"),
     ("Joomla", "CMS", "body", r"/media/jui/|content=\"joomla"),
-    ("Shopify", "Comercio", "body", r"cdn\.shopify\.com|shopify\.theme"),
-    ("WooCommerce", "Comercio", "body", r"woocommerce"),
-    ("Magento", "Comercio", "body", r"mage/cookies|magento"),
-    ("Wix", "Constructor", "body", r"static\.wixstatic\.com|x-wix-"),
-    ("Squarespace", "Constructor", "body", r"squarespace\.com"),
-    ("Next.js", "Framework JS", "body", r"__next_data__|/_next/static/"),
-    ("Nuxt", "Framework JS", "body", r"__nuxt|/_nuxt/"),
-    ("React", "Librería JS", "body", r"data-reactroot|react-dom"),
-    ("Vue.js", "Librería JS", "body", r"data-v-[0-9a-f]{6}|vue(\.min)?\.js"),
-    ("Angular", "Framework JS", "body", r"ng-version=|angular(\.min)?\.js"),
-    ("jQuery", "Librería JS", "body", r"jquery[.-]?[0-9.]*(\.min)?\.js"),
+    ("Shopify", "E-commerce", "body", r"cdn\.shopify\.com|shopify\.theme"),
+    ("WooCommerce", "E-commerce", "body", r"woocommerce"),
+    ("Magento", "E-commerce", "body", r"mage/cookies|magento"),
+    ("Wix", "Site builder", "body", r"static\.wixstatic\.com|x-wix-"),
+    ("Squarespace", "Site builder", "body", r"squarespace\.com"),
+    ("Next.js", "JS framework", "body", r"__next_data__|/_next/static/"),
+    ("Nuxt", "JS framework", "body", r"__nuxt|/_nuxt/"),
+    ("React", "JS library", "body", r"data-reactroot|react-dom"),
+    ("Vue.js", "JS library", "body", r"data-v-[0-9a-f]{6}|vue(\.min)?\.js"),
+    ("Angular", "JS framework", "body", r"ng-version=|angular(\.min)?\.js"),
+    ("jQuery", "JS library", "body", r"jquery[.-]?[0-9.]*(\.min)?\.js"),
     ("Bootstrap", "CSS", "body", r"bootstrap(\.min)?\.(css|js)"),
     ("Tailwind CSS", "CSS", "body", r"tailwind"),
-    ("Google Analytics", "Analítica", "body", r"googletagmanager\.com/gtag|google-analytics\.com"),
-    ("Google Tag Manager", "Analítica", "body", r"googletagmanager\.com/gtm\.js"),
-    ("Meta Pixel", "Analítica", "body", r"connect\.facebook\.net/.*/fbevents\.js"),
-    ("Hotjar", "Analítica", "body", r"static\.hotjar\.com"),
-    ("reCAPTCHA", "Seguridad", "body", r"google\.com/recaptcha"),
-    ("hCaptcha", "Seguridad", "body", r"hcaptcha\.com"),
-    ("Cloudflare Turnstile", "Seguridad", "body", r"challenges\.cloudflare\.com/turnstile"),
+    ("Google Analytics", "Analytics", "body", r"googletagmanager\.com/gtag|google-analytics\.com"),
+    ("Google Tag Manager", "Analytics", "body", r"googletagmanager\.com/gtm\.js"),
+    ("Meta Pixel", "Analytics", "body", r"connect\.facebook\.net/.*/fbevents\.js"),
+    ("Hotjar", "Analytics", "body", r"static\.hotjar\.com"),
+    ("reCAPTCHA", "Security", "body", r"google\.com/recaptcha"),
+    ("hCaptcha", "Security", "body", r"hcaptcha\.com"),
+    ("Cloudflare Turnstile", "Security", "body", r"challenges\.cloudflare\.com/turnstile"),
 )
 VERSION_LEAK = re.compile(r"\d+\.\d+")
 
 
 def murmur3_32(data, seed=0):
-    """MurmurHash3 x86 de 32 bits con signo (el que usa Shodan para http.favicon.hash)."""
+    """Signed 32-bit MurmurHash3 x86 (the one Shodan uses for http.favicon.hash)."""
     c1, c2 = 0xCC9E2D51, 0x1B873593
     length = len(data)
     h = seed & 0xFFFFFFFF
@@ -87,7 +92,7 @@ def murmur3_32(data, seed=0):
 
 
 def favicon_hash(data):
-    """Igual que Shodan: mmh3 del favicon en base64 con saltos de línea cada 76 caracteres."""
+    """Same as Shodan: mmh3 of the base64 favicon with a line break every 76 characters."""
     return murmur3_32(base64.encodebytes(data))
 
 
@@ -113,58 +118,59 @@ def _get(url, timeout, limit, user_agent, recorder=None):
 
 
 def grade_headers(headers, https):
-    """headers: dict en minúsculas. Devuelve nota A–F, puntos y observaciones."""
+    """headers: lowercase dict. Returns an A–F grade, points and checks."""
     checks, points = [], 0
     hsts = headers.get("strict-transport-security", "")
     if https:
         age = re.search(r"max-age=(\d+)", hsts)
         if age and int(age.group(1)) >= 15552000:
             points += 25
-            checks.append(("ok", "HSTS de al menos 6 meses" + (" con preload" if "preload" in hsts else "")))
+            checks.append(("hsts", "ok", tr("HSTS of at least 6 months with preload") if "preload" in hsts
+                           else tr("HSTS of at least 6 months")))
         elif hsts:
             points += 10
-            checks.append(("aviso", "HSTS con duración corta (menos de 6 meses)"))
+            checks.append(("hsts", "warning", tr("Short HSTS duration (less than 6 months)")))
         else:
-            checks.append(("falta", "Sin HSTS: el navegador podría usar HTTP sin cifrar"))
+            checks.append(("hsts", "missing", tr("No HSTS: the browser could use unencrypted HTTP")))
     else:
-        checks.append(("falta", "El sitio no usa HTTPS"))
+        checks.append(("https", "missing", tr("The site does not use HTTPS")))
     csp = headers.get("content-security-policy", "")
     if csp:
         points += 25 if "unsafe-inline" not in csp else 15
-        checks.append(("ok" if "unsafe-inline" not in csp else "aviso",
-                       "CSP presente" + ("" if "unsafe-inline" not in csp else " pero permite 'unsafe-inline'")))
+        checks.append(("csp", "ok", tr("CSP present")) if "unsafe-inline" not in csp
+                      else ("csp", "warning", tr("CSP present but allows 'unsafe-inline'")))
     else:
-        checks.append(("falta", "Sin Content-Security-Policy: más expuesto a XSS"))
+        checks.append(("csp", "missing", tr("No Content-Security-Policy: more exposed to XSS")))
     if "x-frame-options" in headers or "frame-ancestors" in csp:
         points += 15
-        checks.append(("ok", "Protección contra clickjacking"))
+        checks.append(("clickjacking", "ok", tr("Clickjacking protection")))
     else:
-        checks.append(("falta", "Sin X-Frame-Options ni frame-ancestors: clickjacking posible"))
+        checks.append(("clickjacking", "missing", tr("No X-Frame-Options or frame-ancestors: clickjacking possible")))
     if headers.get("x-content-type-options", "").lower() == "nosniff":
         points += 10
-        checks.append(("ok", "X-Content-Type-Options: nosniff"))
+        checks.append(("nosniff", "ok", "X-Content-Type-Options: nosniff"))
     else:
-        checks.append(("falta", "Sin X-Content-Type-Options: nosniff"))
+        checks.append(("nosniff", "missing", tr("No X-Content-Type-Options: nosniff")))
     if "referrer-policy" in headers:
         points += 10
-        checks.append(("ok", "Referrer-Policy definida"))
+        checks.append(("referrer", "ok", tr("Referrer-Policy set")))
     else:
-        checks.append(("falta", "Sin Referrer-Policy"))
+        checks.append(("referrer", "missing", tr("No Referrer-Policy")))
     if "permissions-policy" in headers:
         points += 10
-        checks.append(("ok", "Permissions-Policy definida"))
+        checks.append(("permissions", "ok", tr("Permissions-Policy set")))
     else:
-        checks.append(("falta", "Sin Permissions-Policy"))
+        checks.append(("permissions", "missing", tr("No Permissions-Policy")))
     if "cross-origin-opener-policy" in headers:
         points += 5
     leaks = [f"{name}: {headers[name]}" for name in ("server", "x-powered-by", "x-aspnet-version", "x-generator")
              if name in headers and VERSION_LEAK.search(headers[name])]
     for leak in leaks:
         points -= 5
-        checks.append(("aviso", "Revela versión de software: " + leak))
+        checks.append(("version", "warning", tr("Reveals the software version: {header}", header=leak)))
     points = max(0, min(100, points))
     letter = "A" if points >= 85 else "B" if points >= 70 else "C" if points >= 55 else "D" if points >= 40 else "F"
-    return {"grade": letter, "points": points, "checks": [{"state": s, "text": t} for s, t in checks],
+    return {"grade": letter, "points": points, "checks": [{"id": i, "state": s, "text": t} for i, s, t in checks],
             "version_leaks": leaks}
 
 
@@ -175,11 +181,11 @@ def analyze_cookies(raw_cookies, https):
         lower = raw.lower()
         issues = []
         if https and "secure" not in lower:
-            issues.append("sin Secure")
+            issues.append(tr("no Secure"))
         if "httponly" not in lower:
-            issues.append("sin HttpOnly")
+            issues.append(tr("no HttpOnly"))
         if "samesite" not in lower:
-            issues.append("sin SameSite")
+            issues.append(tr("no SameSite"))
         rows.append({"name": name, "issues": issues})
     return rows
 

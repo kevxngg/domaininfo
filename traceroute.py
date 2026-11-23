@@ -1,22 +1,26 @@
 #!/usr/bin/env python3
 """
-traceroute.py — Fallback de traceroute en Python
-Autor: @kevxngg (Kevin)
-Uso  : python3 traceroute.py <host> [max_hops]
+traceroute.py — Python traceroute fallback
+Author: @kevxngg (Kevin)
+Usage : python3 traceroute.py <host> [max_hops]
 """
 
 import socket
 import sys
 import time
 
+from i18n import tr
+
+
 def traceroute(dest_name, max_hops=15, timeout=2):
     try:
         dest_addr = socket.gethostbyname(dest_name)
     except socket.gaierror as e:
-        print(f"  [!] No se puede resolver: {dest_name} — {e}")
+        print("  [!] " + tr("Cannot resolve: {host} — {error}", host=dest_name, error=e))
         sys.exit(1)
 
-    print(f"  Traceroute a {dest_name} ({dest_addr}), máx {max_hops} saltos\n")
+    print("  " + tr("Traceroute to {host} ({address}), max {hops} hops", host=dest_name,
+                    address=dest_addr, hops=max_hops) + "\n")
 
     port = 33434
     icmp = socket.getprotobyname('icmp')
@@ -30,8 +34,8 @@ def traceroute(dest_name, max_hops=15, timeout=2):
             # A TCP connection cannot reveal intermediate routers without ICMP.
             if 'recv_socket' in locals():
                 recv_socket.close()
-            print('  [!] Sin permisos RAW: no es posible medir saltos con este método.')
-            print('  Usa traceroute/tracepath o python domaininfo.py -m full.')
+            print('  [!] ' + tr('No RAW socket permission: hops cannot be measured with this method.'))
+            print('  ' + tr('Use traceroute/tracepath or python domaininfo.py -m full.'))
             return
 
         recv_socket.settimeout(timeout)
@@ -65,12 +69,12 @@ def traceroute(dest_name, max_hops=15, timeout=2):
             print(f"  {ttl:2d}  * * *  (timeout)")
 
         if curr_addr == dest_addr:
-            print("\n  Destino alcanzado.")
+            print("\n  " + tr("Destination reached."))
             break
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print(f"Uso: python3 {sys.argv[0]} <host> [max_hops]")
+        print(tr("Usage: python3 {script} <host> [max_hops]", script=sys.argv[0]))
         sys.exit(1)
     host     = sys.argv[1]
     max_hops = int(sys.argv[2]) if len(sys.argv) > 2 else 15

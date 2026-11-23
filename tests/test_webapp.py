@@ -1,6 +1,6 @@
-"""Pruebas de la Fase 1 de DomainInfo 6.0: URL completa, alcance, evidencias y módulo webapp.
+"""DomainInfo 6.0 Phase 1 tests: full URL, scope, evidence and the webapp module.
 
-Todas las peticiones van a un servidor HTTP local en un hilo; no se toca Internet.
+Every request goes to a local HTTP server running in a thread; the Internet is never touched.
 """
 
 import argparse
@@ -29,17 +29,17 @@ COOKIE = "S3SSIONVALUEDONOTLEAK999"
 AWS_KEY = "AKIAIOSFODNN7EXAMPLE"
 
 PAGES = {
-    "/": (200, {}, "<html><head><title>Inicio</title></head><body><h1>Bienvenido</h1></body></html>"),
+    "/": (200, {}, "<html><head><title>Home</title></head><body><h1>Welcome</h1></body></html>"),
     "/login": (200, {
         "Set-Cookie": f"sessionid={COOKIE}; Path=/",
         "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'",
         "X-Frame-Options": "DENY",
-    }, "<html><head><title>Acceso</title></head><body>"
+    }, "<html><head><title>Sign in</title></head><body>"
        "<form method='post' action='/session'>"
        "<input type='text' name='username' autocomplete='username'>"
        "<input type='password' name='password'>"
        f"<input type='hidden' name='csrf_token' value='{TOKEN}'>"
-       "<button>Entrar</button></form></body></html>"),
+       "<button>Enter</button></form></body></html>"),
     "/login-samesite": (200, {"Set-Cookie": "sid=abc; Path=/; HttpOnly; SameSite=Lax"},
                         "<title>B</title><form method='post'><input name='user'>"
                         "<input type='password' name='pass'></form>"),
@@ -59,7 +59,7 @@ PAGES = {
 
 
 class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):  # noqa: N802 (nombre exigido por http.server)
+    def do_GET(self):  # noqa: N802 (name required by http.server)
         path = self.path.split("?", 1)[0]
         self.server.seen.append(self.path)
         if path == "/cors":
@@ -78,7 +78,7 @@ class Handler(BaseHTTPRequestHandler):
         if not any(key.lower() == "content-type" for key in headers):
             self.send_header("Content-Type", "text/html; charset=utf-8")
         data = body.encode()
-        # Como los servidores reales: con Content-Length (http.client suelta antes el socket)
+        # Like real servers: with Content-Length (http.client releases the socket earlier)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -195,10 +195,10 @@ class EvidenceTests(unittest.TestCase):
         self.assertNotIn(COOKIE, text)
         self.assertNotIn(AWS_KEY, text)
         self.assertIn("sessionid=", text)
-        self.assertEqual(evidence.mask("abcdef123456"), "abcd…[oculto]")
+        self.assertEqual(evidence.mask("abcdef123456"), "abcd…[hidden]")
 
     def test_redact_long_values_and_spacing(self):
-        tail = "TAILSECRET" * 40  # más de 256 caracteres
+        tail = "TAILSECRET" * 40  # more than 256 characters
         text = evidence.redact("sessionid=" + "A" * 260 + tail, limit=5000)
         self.assertNotIn("TAILSECRET", text)
         self.assertNotIn("SPACEDSECRET99", evidence.redact("token      =      SPACEDSECRET99"))
@@ -206,8 +206,8 @@ class EvidenceTests(unittest.TestCase):
 
     def test_finding_validation_and_id(self):
         item = evidence.Finding(target="https://a.example/login", path="/login", category="cookies",
-                                title="Cookie sin Secure", severity="media", status="confirmado",
-                                confidence="alta", evidence="Set-Cookie: sid=…", tool="webapp",
+                                title="Cookie without Secure", severity="medium", status="confirmed",
+                                confidence="high", evidence="Set-Cookie: sid=…", tool="webapp",
                                 impact="i", verification="v", recommendation="r", references=["CWE-614"])
         data = item.to_dict()
         for key in ("id", "target", "path", "category", "severity", "status", "confidence", "evidence",
@@ -216,20 +216,22 @@ class EvidenceTests(unittest.TestCase):
         self.assertTrue(data["id"].startswith("DI-"))
         self.assertEqual(data["id"], evidence.Finding(**{**item.__dict__}).to_dict()["id"])
         with self.assertRaises(ValueError):
-            evidence.Finding(target="t", path="/", category="c", title="t", severity="grave", status="confirmado")
+            evidence.Finding(target="t", path="/", category="c", title="t", severity="critical", status="confirmed")
         with self.assertRaises(ValueError):
-            evidence.Finding(target="t", path="/", category="c", title="t", severity="alta", status="vulnerable")
+            evidence.Finding(target="t", path="/", category="c", title="t", severity="high", status="vulnerable")
+        with self.assertRaises(ValueError):  # 5.x Spanish values are no longer accepted
+            evidence.Finding(target="t", path="/", category="c", title="t", severity="alta", status="confirmado")
 
     def test_scores(self):
-        checks = [{"id": "a", "state": "ok", "evidence": "directa"},
-                  {"id": "b", "state": "ok", "evidence": "heuristica"},
-                  {"id": "c", "state": "no_evaluado"},
-                  {"id": "d", "state": "no_aplicable"}]
-        findings = [{"severity": "alta", "status": "confirmado"}, {"severity": "alta", "status": "probable"},
-                    {"severity": "alta", "status": "pendiente"}]
+        checks = [{"id": "a", "state": "ok", "evidence": "direct"},
+                  {"id": "b", "state": "ok", "evidence": "heuristic"},
+                  {"id": "c", "state": "not_evaluated"},
+                  {"id": "d", "state": "not_applicable"}]
+        findings = [{"severity": "high", "status": "confirmed"}, {"severity": "high", "status": "likely"},
+                    {"severity": "high", "status": "pending"}]
         result = evidence.scores(findings, checks)
         self.assertEqual(result["security"], 100 - 20 - 10)
-        self.assertEqual(result["coverage"], 67)  # 2 de 3 aplicables
+        self.assertEqual(result["coverage"], 67)  # 2 of 3 applicable
         self.assertEqual(result["confidence"], 50)
 
     def test_comparable(self):
@@ -252,10 +254,10 @@ class WebappAuditTests(unittest.TestCase):
         result = audit(self.local.base + "/login")
         self.assertEqual(result["url"], self.local.base + "/login")
         self.assertEqual(result["final_url"], self.local.base + "/login")
-        self.assertEqual(result["title"], "Acceso")
+        self.assertEqual(result["title"], "Sign in")
         self.assertIn("/login", self.local.server.seen)
         root = result["root_comparison"]
-        self.assertEqual(root["title"], "Inicio")
+        self.assertEqual(root["title"], "Home")
         self.assertTrue(root["differs"])
         self.assertEqual(root["forms"], 0)
         self.assertEqual(len(result["forms"]), 1)
@@ -286,42 +288,42 @@ class WebappAuditTests(unittest.TestCase):
         titles = " ".join(f["title"] for f in finding(result, "cookies"))
         self.assertIn("HttpOnly", titles)
         self.assertIn("SameSite", titles)
-        # Por HTTP no se exige Secure: no aplica
+        # Over HTTP, Secure is not required: not applicable
         self.assertNotIn("Secure", titles)
 
     def test_csp_and_clickjacking(self):
         result = audit(self.local.base + "/login")
         csp = result["headers"]["csp"]
         self.assertTrue(csp["present"])
-        self.assertIn("'unsafe-inline' en script-src", csp["issues"])
+        self.assertIn("'unsafe-inline' in script-src", csp["issues"])
         self.assertTrue(result["headers"]["clickjacking"]["protected"])
         self.assertFalse(finding(result, "clickjacking"))
 
     def test_csrf_alternative_protection(self):
         result = audit(self.local.base + "/login-samesite")
         csrf = result["forms"][0]["csrf"]
-        self.assertEqual(csrf["state"], "proteccion_alternativa")
+        self.assertEqual(csrf["state"], "alternative_protection")
         statuses = {f["status"] for f in finding(result, "csrf")}
-        self.assertNotIn("confirmado", statuses)
+        self.assertNotIn("confirmed", statuses)
 
     def test_csrf_unknown_is_pending_not_vulnerable(self):
         result = audit(self.local.base + "/login-bare")
-        self.assertEqual(result["forms"][0]["csrf"]["state"], "desconocido")
+        self.assertEqual(result["forms"][0]["csrf"]["state"], "unknown")
         self.assertEqual(result["forms"][0]["user_fields"], ["email"])
         items = finding(result, "csrf")
         self.assertTrue(items)
-        self.assertTrue(all(f["status"] == "pendiente" for f in items))
+        self.assertTrue(all(f["status"] == "pending" for f in items))
 
     def test_password_over_get_and_http(self):
         result = audit(self.local.base + "/login-get")
-        titles = " ".join(f["title"] for f in finding(result, "formularios"))
+        titles = " ".join(f["title"] for f in finding(result, "forms"))
         self.assertIn("GET", titles)
         self.assertIn("HTTP", titles)
 
     def test_search_form_not_login(self):
         result = audit(self.local.base + "/search")
         self.assertFalse(result["forms"][0]["login"])
-        self.assertEqual(result["forms"][0]["csrf"]["state"], "no_aplicable")
+        self.assertEqual(result["forms"][0]["csrf"]["state"], "not_applicable")
         self.assertFalse(finding(result, "csrf"))
 
     def test_redirect_inside_scope(self):
@@ -335,7 +337,7 @@ class WebappAuditTests(unittest.TestCase):
         self.assertEqual(result["final_url"], self.local.base + "/redir-out")
         self.assertTrue(result["redirects"][0]["blocked"])
         self.assertIn("evil.invalid", result["redirects"][0]["location"])
-        self.assertTrue(finding(result, "redirecciones"))
+        self.assertTrue(finding(result, "redirects"))
 
     def test_redirect_loop_limited(self):
         result = audit(self.local.base + "/loop")
@@ -345,17 +347,17 @@ class WebappAuditTests(unittest.TestCase):
     def test_error_exposure(self):
         result = audit(self.local.base + "/error")
         self.assertEqual(result["status"], 500)
-        items = finding(result, "errores")
+        items = finding(result, "errors")
         self.assertTrue(items)
-        self.assertEqual(items[0]["status"], "confirmado")
+        self.assertEqual(items[0]["status"], "confirmed")
         self.assertIn("Python", items[0]["title"])
 
     def test_sensitive_data_redacted(self):
         result = audit(self.local.base + "/leak")
-        items = finding(result, "exposicion")
+        items = finding(result, "exposure")
         kinds = " ".join(f["title"] for f in items)
         self.assertIn("AWS", kinds)
-        self.assertIn("privada", kinds)
+        self.assertIn("Private key", kinds)
         self.assertNotIn(AWS_KEY, json.dumps(result))
 
     def test_cors_reflection(self):
@@ -363,13 +365,19 @@ class WebappAuditTests(unittest.TestCase):
         self.assertTrue(result["cors"]["reflects_origin"])
         self.assertTrue(result["cors"]["credentials"])
         items = finding(result, "cors")
-        self.assertEqual(items[0]["status"], "confirmado")
-        self.assertEqual(items[0]["severity"], "alta")
+        self.assertEqual(items[0]["status"], "confirmed")
+        self.assertEqual(items[0]["severity"], "high")
 
     def test_hsts_not_applicable_over_http(self):
         result = audit(self.local.base + "/")
         check = next(c for c in result["checks"] if c["id"] == "hsts")
-        self.assertEqual(check["state"], "no_aplicable")
+        self.assertEqual(check["state"], "not_applicable")
+        states = {c["id"]: c["state"] for c in result["checks"]}
+        self.assertEqual(states["root"], "not_applicable")
+        self.assertTrue(set(states) <= {"https", "redirects", "hsts", "csp", "clickjacking", "nosniff", "referrer",
+                                        "permissions", "cookies", "forms", "csrf", "cors", "errors", "exposure",
+                                        "root"})
+        self.assertTrue({c["state"] for c in result["checks"]} <= set(evidence.CHECK_STATES))
 
     def test_every_finding_has_origin(self):
         result = audit(self.local.base + "/login-get")
@@ -378,6 +386,8 @@ class WebappAuditTests(unittest.TestCase):
             self.assertTrue(item["evidence"])
             self.assertTrue(item["recommendation"])
             self.assertIn(item["status"], evidence.STATUSES)
+            self.assertIn(item["severity"], evidence.SEVERITIES)
+            self.assertIn(item["confidence"], evidence.CONFIDENCE)
 
     def test_scores_present(self):
         result = audit(self.local.base + "/login")
@@ -385,7 +395,7 @@ class WebappAuditTests(unittest.TestCase):
             self.assertTrue(0 <= result["assessment"][key] <= 100)
 
     def test_private_redirect_blocked_for_public_origin(self):
-        # Origen "público" simulado que redirige a loopback: debe bloquearse (SSRF).
+        # Simulated "public" origin that redirects to loopback: must be blocked (SSRF).
         policy = safety.ScopePolicy("https://public.example/", extra_hosts=["127.0.0.1"],
                                     resolver=lambda host: ["8.8.8.8"] if host == "public.example" else ["127.0.0.1"])
         with self.assertRaises(safety.ScopeError):
@@ -405,7 +415,7 @@ class CliTests(unittest.TestCase):
             code, report = self.run_cli(["-m", "webapp", "--url", local.base + "/login"])
         self.assertEqual(code, 0)
         self.assertEqual(report["meta"]["target"], local.base + "/login")
-        self.assertEqual(report["modules"]["webapp"]["data"]["title"], "Acceso")
+        self.assertEqual(report["modules"]["webapp"]["data"]["title"], "Sign in")
         self.assertIn("assessment", report)
         self.assertIn("score", report)
 
@@ -427,22 +437,23 @@ class CliTests(unittest.TestCase):
 
     def test_legacy_score_schema_and_webapp_findings(self):
         report = {"modules": {"webapp": {"status": "ok", "data": {"findings": [
-            {"severity": "alta", "status": "confirmado", "category": "cors", "title": "CORS refleja",
+            {"severity": "high", "status": "confirmed", "category": "cors", "title": "CORS reflects",
              "recommendation": "r"},
-            {"severity": "alta", "status": "pendiente", "category": "csrf", "title": "sin token",
+            {"severity": "high", "status": "pending", "category": "csrf", "title": "no token",
              "recommendation": "r"}], "checks": []}}}}
         result = score.assess(report)
         self.assertEqual(set(result) >= {"score", "grade", "findings", "note"}, True)
         titles = [f["title"] for f in result["findings"]]
-        self.assertIn("CORS refleja", titles)
-        self.assertNotIn("sin token", titles)
+        self.assertIn("CORS reflects", titles)
+        self.assertNotIn("no token", titles)
+        self.assertEqual({f["area"] for f in result["findings"]}, {"Web app"})
 
 
 HOSTILE = {
     "/redos": (200, {}, "\n" * 900_000 + "x"),
-    "/badcharset": (200, {"Content-Type": "text/html; charset=undefined"}, "<title>Rara</title>"),
+    "/badcharset": (200, {"Content-Type": "text/html; charset=undefined"}, "<title>Odd</title>"),
     "/hsts": (200, {"Strict-Transport-Security": "max-age=" + "9" * 5000}, "<title>H</title>"),
-    "/ansi": (200, {"Server": "nginx/1.2\x1b[2J"}, "<title>Hola\x1b[31m</title>"),
+    "/ansi": (200, {"Server": "nginx/1.2\x1b[2J"}, "<title>Hello\x1b[31m</title>"),
     "/to-callback": (302, {"Location": "/cb?code=abcdef123456789&sid=zzzzyyyyxxxx1234&page=2"}, ""),
     "/cb": (200, {}, "<title>cb</title>"),
     "/debug": (500, {}, "Traceback (most recent call last):\n {'SECRET_KEY': 'k3yV4lu3D0NotLeak', "
@@ -451,8 +462,8 @@ HOSTILE = {
 
 
 class HostileServerTests(unittest.TestCase):
-    """Fallos encontrados en la revisión de seguridad: un objetivo hostil no debe colgar, romper
-    ni ensuciar la auditoría."""
+    """Bugs found in the security review: a hostile target must not hang, break or pollute
+    the audit."""
 
     @classmethod
     def setUpClass(cls):
@@ -472,7 +483,7 @@ class HostileServerTests(unittest.TestCase):
         self.assertLess(time.monotonic() - start, 5)
 
     def test_bad_charset_and_huge_max_age_do_not_abort(self):
-        self.assertEqual(audit(self.local.base + "/badcharset")["title"], "Rara")
+        self.assertEqual(audit(self.local.base + "/badcharset")["title"], "Odd")
         with patch.object(webapp._Audit, "run", webapp._Audit.run):
             result = audit(self.local.base + "/hsts")
         self.assertEqual(result["status"], 200)
@@ -518,7 +529,7 @@ class HostileServerTests(unittest.TestCase):
                 conn.sendall(b"HTTP/1.0 200 OK\r\n")
                 while not stop.is_set():
                     try:
-                        conn.sendall(b"X")  # una cabecera interminable, byte a byte
+                        conn.sendall(b"X")  # an endless header, byte by byte
                     except OSError:
                         return
                     time.sleep(0.2)
@@ -547,8 +558,8 @@ class HostileServerTests(unittest.TestCase):
     def test_markdown_escapes_titles(self):
         import render
         report = {"meta": {}, "modules": {"webapp": {"status": "ok", "data": {"findings": [
-            {"id": "DI-1", "title": "x](javascript:alert(1))", "severity": "baja", "status": "confirmado",
-             "category": "c", "confidence": "alta", "evidence": "e", "references": []}]}}}}
+            {"id": "DI-1", "title": "x](javascript:alert(1))", "severity": "low", "status": "confirmed",
+             "category": "c", "confidence": "high", "evidence": "e", "references": []}]}}}}
         self.assertNotIn("](javascript:", render.to_markdown(app, report))
 
 
@@ -565,8 +576,8 @@ class MenuAndReportTests(unittest.TestCase):
             data = ui.history[0]["report"]["modules"]["webapp"]["data"]
             self.assertEqual(data["final_url"], local.base + "/login")
             text = out.getvalue()
-            self.assertIn("Acceso", text)
-            self.assertIn("Raíz del sitio", text)
+            self.assertIn("Sign in", text)
+            self.assertIn("Site root", text)
             self.assertIn("CSRF: token visible", text)
             self.assertNotIn(TOKEN, text)
 
@@ -581,7 +592,7 @@ class MenuAndReportTests(unittest.TestCase):
                         render.to_html(app, report, serialized)):
             self.assertIn("domaininfo.webapp", content)
             self.assertIn("CWE-", content)
-            self.assertIn("Cobertura", content)
+            self.assertIn("Coverage", content)
             self.assertNotIn(COOKIE, content)
             self.assertNotIn(TOKEN, content)
 
@@ -633,11 +644,11 @@ class ToolsTests(unittest.TestCase):
 
 try:
     from hypothesis import given, settings, strategies as st
-except ImportError:  # dependencia de desarrollo opcional
+except ImportError:  # optional development dependency
     given = None
 
 
-@unittest.skipIf(given is None, "hypothesis no instalado (pip install hypothesis)")
+@unittest.skipIf(given is None, "hypothesis not installed (pip install hypothesis)")
 class PropertyTests(unittest.TestCase):
     if given is not None:
         @settings(max_examples=300, deadline=None)

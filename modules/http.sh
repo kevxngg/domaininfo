@@ -20,13 +20,13 @@ warn()    { echo -e "  ${Y}[!]${NC} $1"; }
 info()    { echo -e "  ${DIM}ℹ  $1${NC}"; }
 
 module_http() {
-    is_ip "$TARGET" && { info "Objetivo es IP — omitiendo análisis HTTP de dominio"; return; }
-    header "4 ▸ HTTP/HTTPS — CABECERAS Y TECNOLOGÍA"
+    is_ip "$TARGET" && { info "Target is an IP — skipping domain HTTP analysis"; return; }
+    header "4 ▸ HTTP/HTTPS — HEADERS AND TECHNOLOGY"
 
     local headers status_code server powered content_type
     local hsts csp cors cdn redir cookie_h
 
-    section "Análisis de cabeceras"
+    section "Header analysis"
     local working_proto=""
     for PROTO in https http; do
         local h
@@ -50,21 +50,21 @@ module_http() {
     done
 
     if [[ -z "$working_proto" ]]; then
-        fail "No se pudo conectar al servidor web"
+        fail "Could not connect to the web server"
         return
     fi
 
-    kv "Protocolo"       "${working_proto^^}"
+    kv "Protocol"        "${working_proto^^}"
     kv "HTTP Status"     "${status_code:-?}"
-    kv "Servidor"        "${server:-N/A}"
+    kv "Server"          "${server:-N/A}"
     kv "X-Powered-By"   "${powered:-N/A}"
     kv "Content-Type"   "${content_type:-N/A}"
-    [[ -n "$redir" ]] && kv_y "Redirección" "$redir"
+    [[ -n "$redir" ]] && kv_y "Redirect" "$redir"
 
     echo ""
-    section "Headers de Seguridad"
-    [[ -n "$hsts" ]] && ok "HSTS: $hsts" || kv_r "HSTS" "No configurado"
-    [[ -n "$csp"  ]] && ok "CSP presente" || kv_r "CSP" "No configurada (XSS posible)"
+    section "Security headers"
+    [[ -n "$hsts" ]] && ok "HSTS: $hsts" || kv_r "HSTS" "Not configured"
+    [[ -n "$csp"  ]] && ok "CSP present" || kv_r "CSP" "Not configured (XSS possible)"
     [[ -n "$cors" ]] && kv_y "CORS" "$(echo "$cors" | head -c 80)"
 
     local xframe xcto xss
@@ -72,37 +72,37 @@ module_http() {
     xcto=$(curl -sI --max-time 8 "${working_proto}://${DOMAIN}" 2>/dev/null | grep -i "X-Content-Type-Options" | head -1)
     xss=$(curl -sI --max-time 8 "${working_proto}://${DOMAIN}" 2>/dev/null | grep -i "X-XSS-Protection" | head -1)
 
-    [[ -n "$xframe" ]] && ok "X-Frame-Options presente" || kv_r "X-Frame-Options" "Ausente (clickjacking posible)"
-    [[ -n "$xcto"   ]] && ok "X-Content-Type-Options presente" || kv_r "X-Content-Type-Options" "Ausente"
-    [[ -n "$xss"    ]] && ok "X-XSS-Protection presente" || info "X-XSS-Protection no reportado"
+    [[ -n "$xframe" ]] && ok "X-Frame-Options present" || kv_r "X-Frame-Options" "Missing (clickjacking possible)"
+    [[ -n "$xcto"   ]] && ok "X-Content-Type-Options present" || kv_r "X-Content-Type-Options" "Missing"
+    [[ -n "$xss"    ]] && ok "X-XSS-Protection present" || info "X-XSS-Protection not reported"
 
-    section "CDN / Infraestructura detectada"
+    section "Detected CDN / infrastructure"
     if [[ -n "$cdn" ]]; then
         while IFS= read -r l; do
             [[ -n "$l" ]] && kv_y "CDN/Cloud" "$l"
         done <<< "$cdn"
-        echo "$cdn" | grep -qi "cf-ray"           && ok "Cloudflare CDN confirmado"
-        echo "$cdn" | grep -qi "x-amz\|amazon"   && ok "AWS / Amazon CloudFront detectado"
-        echo "$cdn" | grep -qi "x-azure"          && ok "Microsoft Azure detectado"
-        echo "$cdn" | grep -qi "x-vercel"         && ok "Vercel detectado"
+        echo "$cdn" | grep -qi "cf-ray"           && ok "Cloudflare CDN confirmed"
+        echo "$cdn" | grep -qi "x-amz\|amazon"   && ok "AWS / Amazon CloudFront detected"
+        echo "$cdn" | grep -qi "x-azure"          && ok "Microsoft Azure detected"
+        echo "$cdn" | grep -qi "x-vercel"         && ok "Vercel detected"
     else
-        info "No se detectó CDN conocido"
+        info "No known CDN detected"
     fi
 
     section "Cookies"
     if [[ -n "$cookie_h" ]]; then
         while IFS= read -r l; do
             [[ -n "$l" ]] && echo -e "  ${DIM}$l${NC}"
-            echo "$l" | grep -qi "secure"   && ok "  → Cookie con flag Secure"
-            echo "$l" | grep -qi "httponly" && ok "  → Cookie con flag HttpOnly"
-            echo "$l" | grep -qi "samesite" || kv_r "  → Cookie sin SameSite" "posible CSRF"
+            echo "$l" | grep -qi "secure"   && ok "  → Cookie with Secure flag"
+            echo "$l" | grep -qi "httponly" && ok "  → Cookie with HttpOnly flag"
+            echo "$l" | grep -qi "samesite" || kv_r "  → Cookie without SameSite" "possible CSRF"
         done <<< "$cookie_h"
     else
-        info "Sin cookies en respuesta inicial"
+        info "No cookies in the initial response"
     fi
 
     # ── SSL/TLS
-    section "Certificado SSL/TLS"
+    section "SSL/TLS certificate"
     if command -v openssl &>/dev/null; then
         local ssl_raw
         ssl_raw=$(echo | timeout 8 openssl s_client \
@@ -121,51 +121,51 @@ module_http() {
             tls_ver=$(echo "$ssl_raw"     | grep "Protocol  :"      | head -1 | awk '{print $NF}')
 
             kv "Subject (CN)"    "${subject:-N/A}"
-            kv "Emisor (CA)"     "${issuer:-N/A}"
-            kv "Válido desde"    "${not_before:-N/A}"
-            kv "Válido hasta"    "${not_after:-N/A}"
-            kv "Algoritmo firma" "${sig_alg:-N/A}"
-            kv "TLS versión"     "${tls_ver:-N/A}"
+            kv "Issuer (CA)"     "${issuer:-N/A}"
+            kv "Valid from"      "${not_before:-N/A}"
+            kv "Valid until"     "${not_after:-N/A}"
+            kv "Signature alg."  "${sig_alg:-N/A}"
+            kv "TLS version"     "${tls_ver:-N/A}"
             if [[ -n "$sans" ]]; then
-                echo -e "  ${C}SANs (dominios cubiertos):${NC}"
+                echo -e "  ${C}SANs (covered domains):${NC}"
                 echo "$sans" | while IFS= read -r s; do
                     [[ -n "$s" ]] && echo -e "    ${DIM}$s${NC}"
                 done
             fi
 
-            # Días de validez restante
+            # Remaining days of validity
             local exp_epoch now_epoch days_ssl
             exp_epoch=$(date -d "${not_after}" +%s 2>/dev/null || date -j -f "%b %d %T %Y %Z" "$not_after" +%s 2>/dev/null)
             now_epoch=$(date +%s)
             if [[ -n "$exp_epoch" ]]; then
                 days_ssl=$(( (exp_epoch - now_epoch) / 86400 ))
                 if [[ $days_ssl -lt 14 ]]; then
-                    kv_r "⚠ Cert expira en" "${days_ssl} días"
+                    kv_r "⚠ Cert expires in" "${days_ssl} days"
                 elif [[ $days_ssl -lt 30 ]]; then
-                    kv_y "Cert expira en" "${days_ssl} días"
+                    kv_y "Cert expires in" "${days_ssl} days"
                 else
-                    ok "Cert válido por ${days_ssl} días más"
+                    ok "Cert valid for ${days_ssl} more days"
                 fi
             fi
         else
-            kv_r "SSL/TLS" "No se pudo obtener certificado"
+            kv_r "SSL/TLS" "Could not retrieve the certificate"
         fi
     else
-        warn "openssl no disponible"
+        warn "openssl not available"
     fi
 
-    # ── Tecnologías detectadas en HTML
-    section "Detección de tecnologías (HTML)"
+    # ── Technologies detected in the HTML
+    section "Technology detection (HTML)"
     local body
     body=$(curl -sL --max-time 12 -A "Mozilla/5.0" "${working_proto}://${DOMAIN}" 2>/dev/null | head -c 20000)
     if [[ -n "$body" ]]; then
         echo "$body" | grep -qi "wp-content\|wordpress" && kv_y "CMS" "WordPress"
-        echo "$body" | grep -qi "Shopify"               && kv_y "Plataforma" "Shopify"
+        echo "$body" | grep -qi "Shopify"               && kv_y "Platform" "Shopify"
         echo "$body" | grep -qi "drupal"                && kv_y "CMS" "Drupal"
         echo "$body" | grep -qi "joomla"                && kv_y "CMS" "Joomla"
-        echo "$body" | grep -qi "wix.com"               && kv_y "Plataforma" "Wix"
-        echo "$body" | grep -qi "squarespace"           && kv_y "Plataforma" "Squarespace"
-        echo "$body" | grep -qi "webflow"               && kv_y "Plataforma" "Webflow"
+        echo "$body" | grep -qi "wix.com"               && kv_y "Platform" "Wix"
+        echo "$body" | grep -qi "squarespace"           && kv_y "Platform" "Squarespace"
+        echo "$body" | grep -qi "webflow"               && kv_y "Platform" "Webflow"
         echo "$body" | grep -qi "react\|__react"        && kv_y "JS Framework" "React"
         echo "$body" | grep -qi "ng-version\|angular"  && kv_y "JS Framework" "Angular"
         echo "$body" | grep -qi "vue.js\|__vue"        && kv_y "JS Framework" "Vue.js"
@@ -173,14 +173,14 @@ module_http() {
         echo "$body" | grep -qi "gtag\|google-analytics\|ga.js" && kv "Analytics" "Google Analytics"
         echo "$body" | grep -qi "fbq\|connect.facebook" && kv "Pixel" "Facebook Pixel"
         echo "$body" | grep -qi "hotjar"                && kv "Heatmap" "Hotjar"
-        echo "$body" | grep -qi "jquery"                && kv "Librería" "jQuery"
+        echo "$body" | grep -qi "jquery"                && kv "Library" "jQuery"
         echo "$body" | grep -qi "bootstrap"             && kv "CSS" "Bootstrap"
         echo "$body" | grep -qi "tailwind"              && kv "CSS" "TailwindCSS"
-        echo "$body" | grep -qi "recaptcha"             && ok "reCAPTCHA presente"
+        echo "$body" | grep -qi "recaptcha"             && ok "reCAPTCHA present"
         # Title
         local title
         title=$(echo "$body" | grep -oP '(?i)(?<=<title>)[^<]+' | head -1 | xargs)
-        [[ -n "$title" ]] && kv "Título página" "$title"
+        [[ -n "$title" ]] && kv "Page title" "$title"
         # Generator
         local gen
         gen=$(echo "$body" | grep -oP '(?i)content="[^"]*generator[^"]*"\s+name="generator"|name="generator"\s+content="\K[^"]+' | head -1)
@@ -189,5 +189,5 @@ module_http() {
 }
 
 # ════════════════════════════════════════════════════════════════════
-# MÓDULO: PUERTOS
+# MODULE: PORTS
 # ════════════════════════════════════════════════════════════════════

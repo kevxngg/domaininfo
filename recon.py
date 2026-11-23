@@ -1,6 +1,9 @@
-"""Subdominios por registros públicos de certificados (Certificate Transparency) y,
-opcionalmente, por lista de palabras; detección de subdominios abandonados que
-podrían ser tomados (subdomain takeover) a partir del CNAME y la respuesta HTTP.
+"""Subdomains from public certificate logs (Certificate Transparency) and, optionally,
+from a word list; detection of abandoned subdomains that could be taken over
+(subdomain takeover) from the CNAME and the HTTP response.
+
+Takeover ``risk`` values: ``high`` (dangling CNAME to a known service), ``review`` (dangling
+CNAME to an unknown service) and ``possible`` (the service says the resource does not exist).
 """
 
 from concurrent.futures import ThreadPoolExecutor
@@ -10,8 +13,9 @@ import socket
 from urllib import error, parse, request
 
 import dnsclient
+from i18n import tr
 
-# servicio, sufijos del CNAME, texto que aparece cuando el recurso no existe
+# service, CNAME suffixes, text shown when the resource does not exist
 TAKEOVER = (
     ("GitHub Pages", ("github.io",), "There isn't a GitHub Pages site here"),
     ("Heroku", ("herokuapp.com", "herokudns.com"), "No such app"),
@@ -43,7 +47,7 @@ def _json(url, timeout, limit=12 * 1024 * 1024):
     with request.urlopen(req, timeout=timeout) as response:
         body = response.read(limit + 1)
         if len(body) > limit:
-            raise ValueError("Respuesta demasiado grande")
+            raise ValueError(tr("Response too large"))
         return json.loads(body)
 
 
@@ -59,7 +63,7 @@ def clean(names, domain):
 
 
 def from_ct(domain, timeout):
-    """crt.sh y, si falla, Cert Spotter. Devuelve (nombres, fuente)."""
+    """crt.sh and, if it fails, Cert Spotter. Returns (names, source)."""
     try:
         rows = _json(f"https://crt.sh/?q={parse.quote('%.' + domain)}&output=json", max(timeout, 25))
         return clean((row.get("name_value", "") for row in rows), domain), "crt.sh"
@@ -97,7 +101,7 @@ def takeover_service(cname):
 
 
 def inspect(name, timeout, http_get):
-    """Direcciones, CNAME y riesgo de takeover de un subdominio."""
+    """Addresses, CNAME and takeover risk of a subdomain."""
     row = {"name": name, "addresses": [], "cname": None}
     try:
         row["addresses"] = sorted({entry[4][0] for entry in socket.getaddrinfo(name, None, type=socket.SOCK_STREAM)})
@@ -116,8 +120,8 @@ def inspect(name, timeout, http_get):
     except dnsclient.DNSError:
         target_rcode = None
     if target_rcode == "NXDOMAIN":
-        row["takeover"] = {"risk": "alto" if service else "revisar", "service": service,
-                           "reason": f"El CNAME apunta a {row['cname']}, que ya no existe"}
+        row["takeover"] = {"risk": "high" if service else "review", "service": service,
+                           "reason": tr("The CNAME points to {cname}, which no longer exists", cname=row["cname"])}
     elif service and marker:
         for scheme in ("https", "http"):
             try:
@@ -125,8 +129,9 @@ def inspect(name, timeout, http_get):
             except (OSError, ValueError):
                 continue
             if marker.lower() in body.lower():
-                row["takeover"] = {"risk": "posible", "service": service,
-                                   "reason": f"{service} responde que el recurso no existe ('{marker}')"}
+                row["takeover"] = {"risk": "possible", "service": service,
+                                   "reason": tr("{service} says the resource does not exist ('{marker}')",
+                                                service=service, marker=marker)}
             break
     return row
 
@@ -148,10 +153,10 @@ def audit(domain, threads, timeout, brute=False):
         names.update(found)
         sources.append(source)
     except (OSError, ValueError) as exc:
-        note = f"Registros de certificados no disponibles: {exc}"
+        note = tr("Certificate logs unavailable: {error}", error=exc)
     if brute:
         names.update(from_wordlist(domain, threads, timeout))
-        sources.append("lista de palabras")
+        sources.append("wordlist")
     ordered = sorted(names)
     checked = ordered[:MAX_RESOLVE]
     with ThreadPoolExecutor(max_workers=threads) as pool:
@@ -161,7 +166,7 @@ def audit(domain, threads, timeout, brute=False):
               "alive": alive, "takeover": [r for r in rows if r.get("takeover")],
               "unresolved": [r["name"] for r in rows if not r["addresses"] and not r["cname"]][:100]}
     if len(ordered) > MAX_RESOLVE:
-        result["note"] = f"Se comprobaron los primeros {MAX_RESOLVE} de {len(ordered)} subdominios"
+        result["note"] = tr("Checked the first {checked} of {total} subdomains", checked=MAX_RESOLVE, total=len(ordered))
     if note:
         result["warning"] = note
     return result

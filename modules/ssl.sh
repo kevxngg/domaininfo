@@ -21,16 +21,16 @@ info()    { echo -e "  ${DIM}ℹ  $1${NC}"; }
 
 module_ssl_vulns() {
     is_ip "$TARGET" && return
-    header "11 ▸ VULNERABILIDADES SSL/TLS"
+    header "11 ▸ SSL/TLS VULNERABILITIES"
 
     if ! timeout 3 bash -c "echo >/dev/tcp/${DOMAIN}/443" 2>/dev/null; then
-        info "Puerto 443 no accesible — saltando análisis SSL"
+        info "Port 443 not reachable — skipping SSL analysis"
         return
     fi
 
-    section "Versiones de protocolo soportadas"
+    section "Supported protocol versions"
 
-    # Verificar TLS 1.0 (obsoleto e inseguro)
+    # Check TLS 1.0 (obsolete and insecure)
     local tls10 tls11 tls12 tls13
     tls10=$(echo | timeout 5 openssl s_client -servername "$DOMAIN" -connect "${DOMAIN}:443" -tls1 2>/dev/null | grep -E 'Cipher is|Cipher *:' | grep -vE 'NONE|0000' | head -1)
     tls11=$(echo | timeout 5 openssl s_client -servername "$DOMAIN" -connect "${DOMAIN}:443" -tls1_1 2>/dev/null | grep -E 'Cipher is|Cipher *:' | grep -vE 'NONE|0000' | head -1)
@@ -38,30 +38,30 @@ module_ssl_vulns() {
     tls13=$(echo | timeout 5 openssl s_client -servername "$DOMAIN" -connect "${DOMAIN}:443" -tls1_3 2>/dev/null | grep -E 'Cipher is|Cipher *:' | grep -vE 'NONE|0000' | head -1)
 
     if [[ -n "$tls10" ]] && ! echo "$tls10" | grep -q "no peer\|error\|failure"; then
-        kv_r "TLS 1.0" "SOPORTADO — obsoleto (POODLE/BEAST risk)"
+        kv_r "TLS 1.0" "SUPPORTED — obsolete (POODLE/BEAST risk)"
     else
-        info "TLS 1.0: negociación no confirmada (servidor o política local)"
+        info "TLS 1.0: negotiation not confirmed (server or local policy)"
     fi
 
     if [[ -n "$tls11" ]] && ! echo "$tls11" | grep -q "no peer\|error\|failure"; then
-        kv_r "TLS 1.1" "SOPORTADO — obsoleto"
+        kv_r "TLS 1.1" "SUPPORTED — obsolete"
     else
-        info "TLS 1.1: negociación no confirmada (servidor o política local)"
+        info "TLS 1.1: negotiation not confirmed (server or local policy)"
     fi
 
     if [[ -n "$tls12" ]] && ! echo "$tls12" | grep -q "no peer\|error\|failure"; then
-        ok "TLS 1.2 soportado"
+        ok "TLS 1.2 supported"
     else
-        kv_y "TLS 1.2" "No disponible"
+        kv_y "TLS 1.2" "Not available"
     fi
 
     if [[ -n "$tls13" ]] && ! echo "$tls13" | grep -q "no peer\|error\|failure"; then
-        ok "TLS 1.3 soportado — óptimo"
+        ok "TLS 1.3 supported — optimal"
     else
-        kv_y "TLS 1.3" "No disponible (recomendado habilitarlo)"
+        kv_y "TLS 1.3" "Not available (enabling it is recommended)"
     fi
 
-    section "Certificado SSL"
+    section "SSL certificate"
     local cert_info
     cert_info=$(echo | timeout 5 openssl s_client -servername "$DOMAIN" -connect "${DOMAIN}:443" 2>/dev/null | openssl x509 -noout -dates -subject -issuer 2>/dev/null)
     if [[ -n "$cert_info" ]]; then
@@ -69,25 +69,25 @@ module_ssl_vulns() {
         not_after=$(echo "$cert_info" | grep "notAfter" | cut -d= -f2)
         local issuer
         issuer=$(echo "$cert_info" | grep "issuer" | cut -d= -f2-)
-        [[ -n "$not_after"  ]] && kv "Expira" "$not_after"
-        [[ -n "$issuer"     ]] && kv "Emisor" "$issuer"
-        # Verificar si está vencido
+        [[ -n "$not_after"  ]] && kv "Expires" "$not_after"
+        [[ -n "$issuer"     ]] && kv "Issuer" "$issuer"
+        # Check whether it has expired
         if [[ -n "$not_after" ]]; then
             local exp_epoch
             exp_epoch=$(date -d "$not_after" +%s 2>/dev/null || date -j -f "%b %d %T %Y %Z" "$not_after" +%s 2>/dev/null)
             local now_epoch
             now_epoch=$(date +%s)
             if [[ -n "$exp_epoch" ]] && [[ "$exp_epoch" -lt "$now_epoch" ]]; then
-                kv_r "⚠ CERTIFICADO" "VENCIDO"
+                kv_r "⚠ CERTIFICATE" "EXPIRED"
             else
-                ok "Certificado vigente"
+                ok "Certificate is valid"
             fi
         fi
     else
-        warn "No se pudo obtener información del certificado"
+        warn "Could not retrieve certificate information"
     fi
 }
 
 # ════════════════════════════════════════════════════════════════════
-# MÓDULO: TECNOLOGÍAS Y CMS
+# MODULE: TECHNOLOGIES AND CMS
 # ════════════════════════════════════════════════════════════════════

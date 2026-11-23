@@ -1,6 +1,8 @@
 """Guided terminal interface for DomainInfo. Kevin (@kevxngg).
 
 Standard library only; numbered navigation also works in Android terminals.
+Every label below is English source text and is translated with ``tr()`` when it is shown,
+so changing the language in Preferences takes effect on the next screen.
 """
 
 import argparse
@@ -18,56 +20,63 @@ import textwrap
 from urllib.parse import urlsplit
 import webbrowser
 
+import i18n
+from i18n import tr
+
 
 MODE_LABELS = {
-    "quick": ("Análisis rápido", "Resolver IPs y consultar el registro del dominio"),
-    "web": ("Sitio web y certificado", "HTTP, cabeceras de seguridad y conexión TLS"),
-    "ports": ("Puertos TCP", "Comprobar servicios accesibles en tu equipo"),
-    "full": ("Diagnóstico completo", "Todo: DNS, registro, red, web, TLS, correo, subdominios y puertos"),
-    "mail": ("Correo del dominio", "SPF, DMARC, DKIM y MTA-STS: ¿se puede suplantar el dominio?"),
-    "recon": ("Reconocimiento OSINT", "Subdominios, red (ASN), tecnologías e historia del dominio"),
-    "brand": ("Marca y phishing", "Dominios parecidos registrados que podrían imitar el tuyo"),
-    "mikrotik": ("MikroTik / RouterOS", "Versión, servicios de gestión y avisos aplicables"),
-    "webapp": ("Seguridad de aplicación web", "Una URL concreta: formularios, CSRF, cookies, CSP, CORS y errores"),
+    "quick": ("Quick analysis", "Resolve IPs and look up the domain registration"),
+    "web": ("Website and certificate", "HTTP, security headers and TLS connection"),
+    "ports": ("TCP ports", "Check which services are reachable from your computer"),
+    "full": ("Full diagnostics", "Everything: DNS, registration, network, web, TLS, mail, subdomains and ports"),
+    "mail": ("Domain mail", "SPF, DMARC, DKIM and MTA-STS: can the domain be spoofed?"),
+    "recon": ("OSINT reconnaissance", "Subdomains, network (ASN), technologies and domain history"),
+    "brand": ("Brand and phishing", "Registered lookalike domains that could imitate yours"),
+    "mikrotik": ("MikroTik / RouterOS", "Version, management services and applicable advisories"),
+    "webapp": ("Web application security", "One specific URL: forms, CSRF, cookies, CSP, CORS and errors"),
 }
 MODE_KEYS = {"1": "quick", "2": "web", "3": "ports", "4": "full", "5": "mikrotik",
              "e": "mail", "s": "recon", "p": "brand", "w": "webapp"}
-STATUS_LABELS = {"confirmado": "CONFIRMADO", "probable": "PROBABLE", "informativo": "INFO",
-                 "pendiente": "PENDIENTE DE VERIFICAR", "no_aplicable": "NO APLICA",
-                 "no_evaluado": "NO EVALUADO", "error": "ERROR"}
-CSRF_LABELS = {"token_visible": "token visible", "token_en_meta": "token en <meta> (revisar envío)",
-               "proteccion_alternativa": "sin token; cookies SameSite", "desconocido": "sin protección visible "
-               "(pendiente de verificar)", "no_aplicable": "no aplica (GET)"}
-MODULE_LABELS = {"dns": "Resolución de direcciones", "rdap": "Registro RDAP",
-                 "http": "Sitio y cabeceras HTTP", "tls": "Certificado TLS",
-                 "ports": "Servicios TCP", "traceroute": "Ruta de red",
-                 "mikrotik": "Auditoría RouterOS", "asn": "Red y operador (ASN)",
-                 "mail": "Seguridad del correo", "tech": "Tecnologías y cabeceras",
-                 "subdomains": "Subdominios", "history": "Historia del dominio",
-                 "lookalike": "Dominios parecidos", "webapp": "Seguridad de la aplicación web"}
+STATUS_LABELS = {"confirmed": "CONFIRMED", "likely": "LIKELY", "informational": "INFO",
+                 "pending": "PENDING VERIFICATION", "not_applicable": "NOT APPLICABLE",
+                 "not_evaluated": "NOT EVALUATED", "error": "ERROR"}
+CSRF_LABELS = {"token_visible": "token visible", "token_in_meta": "token in <meta> (check that it is sent)",
+               "alternative_protection": "no token; SameSite cookies", "unknown": "no visible protection "
+               "(pending verification)", "not_applicable": "not applicable (GET)"}
+MODULE_LABELS = {"dns": "Address resolution", "rdap": "RDAP registration",
+                 "http": "Website and HTTP headers", "tls": "TLS certificate",
+                 "ports": "TCP services", "traceroute": "Network route",
+                 "mikrotik": "RouterOS audit", "asn": "Network and operator (ASN)",
+                 "mail": "Mail security", "tech": "Technologies and headers",
+                 "subdomains": "Subdomains", "history": "Domain history",
+                 "lookalike": "Lookalike domains", "webapp": "Web application security"}
 MODULE_HELP = {
-    "dns": "Direcciones IPv4/IPv6 que el sistema devuelve para el objetivo.",
-    "rdap": "Datos públicos del registro del dominio o del bloque de direcciones IP.",
-    "http": "Respuesta de la página y cabeceras que indican políticas de seguridad del sitio.",
-    "tls": "Protocolo cifrado negociado y certificado validado por Python.",
-    "ports": "Servicios TCP que respondieron desde este equipo durante la revisión.",
-    "traceroute": "Saltos de red informados por la herramienta de ruta del sistema.",
-    "mikrotik": "Comparación de la versión RouterOS con los avisos del catálogo fechado.",
-    "asn": "Sistema autónomo, bloque de red, país, operador y nombre inverso de cada IP.",
-    "mail": "SPF, DMARC, DKIM, MTA-STS, TLS-RPT y BIMI: si alguien puede enviar correo falso en nombre del dominio.",
-    "tech": "Tecnologías detectadas, nota de las cabeceras de seguridad, cookies, favicon y security.txt.",
-    "subdomains": "Subdominios publicados en registros de certificados y subdominios que podrían ser tomados.",
-    "history": "Antigüedad y caducidad del registro, registrador y capturas en la Wayback Machine.",
-    "lookalike": "Variantes del nombre (errores de tecleo, homoglifos, otros TLD) que están registradas.",
-    "webapp": "Análisis pasivo de la URL pedida (solo GET): formularios, CSRF, cookies, cabeceras, CORS, "
-              "errores técnicos y datos expuestos, comparado con la raíz del sitio.",
+    "dns": "IPv4/IPv6 addresses the system returns for the target.",
+    "rdap": "Public registration data of the domain or of the IP address block.",
+    "http": "Page response and headers that state the site's security policies.",
+    "tls": "Negotiated encrypted protocol and certificate validated by Python.",
+    "ports": "TCP services that answered from this computer during the review.",
+    "traceroute": "Network hops reported by the system's route tool.",
+    "mikrotik": "Comparison of the RouterOS version with the advisories of the dated catalog.",
+    "asn": "Autonomous system, network block, country, operator and reverse name of each IP.",
+    "mail": "SPF, DMARC, DKIM, MTA-STS, TLS-RPT and BIMI: whether someone can send fake mail on behalf of the domain.",
+    "tech": "Detected technologies, security header grade, cookies, favicon and security.txt.",
+    "subdomains": "Subdomains published in certificate logs and subdomains that could be taken over.",
+    "history": "Registration age and expiry, registrar and Wayback Machine captures.",
+    "lookalike": "Name variants (typos, homoglyphs, other TLDs) that are registered.",
+    "webapp": "Passive analysis of the requested URL (GET only): forms, CSRF, cookies, headers, CORS, "
+              "technical errors and exposed data, compared with the site root.",
 }
-SEVERITY_COLORS = {"alta": "1;31", "media": "33", "baja": "36", "info": "90"}
-SEVERITY_LABELS = {"alta": "ALTA", "media": "MEDIA", "baja": "BAJA", "info": "INFO"}
-ADVISORY_LABELS = {"potentially_affected": "REVISAR: versión incluida en el aviso",
-                   "not_in_affected_range": "Versión fuera del intervalo afectado",
-                   "unknown_version": "SIN EVALUAR: falta la versión",
-                   "manual_review": "SIN CONCLUSIÓN: revisar la versión manualmente"}
+SEVERITY_COLORS = {"high": "1;31", "medium": "33", "low": "36", "info": "90"}
+SEVERITY_LABELS = {"high": "HIGH", "medium": "MEDIUM", "low": "LOW", "info": "INFO"}
+ADVISORY_LABELS = {"potentially_affected": "REVIEW: version included in the advisory",
+                   "not_in_affected_range": "Version outside the affected range",
+                   "unknown_version": "NOT EVALUATED: the version is missing",
+                   "manual_review": "NO CONCLUSION: review the version manually"}
+# Header checks from the tech module; the Spanish 5.x states are kept for old saved reports.
+CHECK_MARKS = {"ok": ("[OK]", "32"), "warning": ("[WARNING]", "33"), "missing": ("[MISSING]", "33"),
+               "aviso": ("[WARNING]", "33"), "falta": ("[MISSING]", "33")}
+LANGUAGE_NAMES = {"en": "English", "es": "Español"}
 ANSI = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))")
 
 # Original ASCII letterforms; no figlet executable, font downloads or pip needed.
@@ -102,6 +111,26 @@ def safe_text(value):
     """Remote titles/errors and saved reports must not control the terminal."""
     text = ANSI.sub("", str(value))
     return "".join(char if char.isprintable() or char == "\n" else " " for char in text)
+
+
+def mode_label(mode):
+    return tr(MODE_LABELS[mode][0]) if mode in MODE_LABELS else str(mode)
+
+
+def module_label(name):
+    return tr(MODULE_LABELS[name]) if name in MODULE_LABELS else str(name)
+
+
+def severity_label(level):
+    return tr(SEVERITY_LABELS[level]) if level in SEVERITY_LABELS else str(level).upper()
+
+
+def severity_color(level):
+    return SEVERITY_COLORS.get(level, "90")
+
+
+def status_label(status):
+    return tr(STATUS_LABELS[status]) if status in STATUS_LABELS else str(status).upper()
 
 
 COMMON_SERVICES = {21: "ftp", 22: "ssh", 23: "telnet", 25: "smtp", 53: "dns", 80: "http", 110: "pop3",
@@ -202,40 +231,40 @@ class InteractiveApp:
             print("  " + row, file=self.out)
 
     def home(self):
-        self.screen("MENÚ PRINCIPAL", home=True)
-        audit = [(key, MODE_LABELS[mode][0],
-                  {"quick": "DNS + registro del dominio", "web": "HTTP + cabeceras + TLS",
-                   "ports": "Servicios TCP accesibles", "full": "Todos los módulos generales",
-                   "mikrotik": "Router en red o versión offline", "mail": "¿Se puede suplantar el correo?",
-                   "recon": "Subdominios, red y tecnologías", "brand": "Dominios que imitan el tuyo",
-                   "webapp": "URL completa: login, cookies, CSP"}[mode])
+        self.screen(tr("MAIN MENU"), home=True)
+        audit = [(key, mode_label(mode),
+                  tr({"quick": "DNS + domain registration", "web": "HTTP + headers + TLS",
+                      "ports": "Reachable TCP services", "full": "All general modules",
+                      "mikrotik": "Router on the network or offline version", "mail": "Can the mail be spoofed?",
+                      "recon": "Subdomains, network and technologies", "brand": "Domains that imitate yours",
+                      "webapp": "Full URL: login, cookies, CSP"}[mode]))
                  for key, mode in MODE_KEYS.items()]
-        workspace = [("6", "Varios objetivos", "Auditoría desde un archivo"),
-                     ("7", "Mis reportes", "Resultados y exportaciones"),
-                     ("8", "Preferencias", "Conexiones, tiempos y formatos"),
-                     ("9", "Diagnóstico del equipo", "Estado de las herramientas"),
-                     ("a", "Auditorías clásicas", "ISP / WebApp / LAN con Bash")]
+        workspace = [("6", tr("Several targets"), tr("Audit from a file")),
+                     ("7", tr("My reports"), tr("Results and exports")),
+                     ("8", tr("Preferences"), tr("Connections, timeouts, formats and language")),
+                     ("9", tr("Computer diagnostics"), tr("Status of the tools")),
+                     ("a", tr("Classic audits"), tr("ISP / WebApp / LAN with Bash"))]
         if self.width >= 78:
             panel_width = (self.width - 6) // 2
             detailed = shutil.get_terminal_size((80, 24)).lines >= 34
-            left = self.frame("01 / AUDITORÍAS", audit, panel_width, "36", detailed)
-            right = self.frame("02 / HERRAMIENTAS", workspace, panel_width, "35", detailed)
+            left = self.frame(tr("01 / AUDITS"), audit, panel_width, "36", detailed)
+            right = self.frame(tr("02 / TOOLS"), workspace, panel_width, "35", detailed)
             blank = " " * panel_width
             for index in range(max(len(left), len(right))):
                 print("  " + (left[index] if index < len(left) else blank) + "  "
                       + (right[index] if index < len(right) else blank), file=self.out)
         else:
-            for title, rows, accent in (("AUDITORÍAS", audit, "36"), ("HERRAMIENTAS", workspace, "35")):
+            for title, rows, accent in ((tr("AUDITS"), audit, "36"), (tr("TOOLS"), workspace, "35")):
                 for row in self.frame(title, rows, accent=accent, descriptions=False):
                     print("  " + row, file=self.out)
         self.line()
-        self.panel("NAVEGACIÓN", [("[h] Ayuda rápida     [0] Salir", "90")], "90")
+        self.panel(tr("NAVIGATION"), [(tr("[h] Quick help     [0] Exit"), "90")], "90")
         if self.instant:
-            self.line("Pulsa la tecla de la opción para comenzar." if self.width >= 60
-                      else "Pulsa una tecla · 0 para salir", "90")
+            self.line(tr("Press the option's key to start.") if self.width >= 60
+                      else tr("Press a key · 0 to exit"), "90")
         else:
-            self.line("Elige un módulo para comenzar. NÚMERO + ENTER" if self.width >= 60
-                      else "NÚMERO + ENTER · 0 para salir", "90")
+            self.line(tr("Choose a module to start. NUMBER + ENTER") if self.width >= 60
+                      else tr("NUMBER + ENTER · 0 to exit"), "90")
 
     def screen(self, title, subtitle="", home=False):
         self.at_home = home
@@ -248,7 +277,7 @@ class InteractiveApp:
             gradient = ("1;96", "1;36", "36", "1;34", "34", "36")
             for index, row in enumerate(art):
                 self.line(row.ljust(size).center(self.width - 4), gradient[index % len(gradient)])
-            self.center("DOMINIOS / REDES / ROUTEROS", "90")
+            self.center(tr("DOMAINS / NETWORKS / ROUTEROS"), "90")
             system = "TERMUX" if os.environ.get("TERMUX_VERSION") else platform.system().upper()
             self.center(f"v{self.core.VERSION}  ·  Kevin / @kevxngg" +
                         (f"  ·  {system}" if self.width >= 60 else ""), "90")
@@ -259,8 +288,8 @@ class InteractiveApp:
         if subtitle:
             rows.append((subtitle, "90"))
         if not home:
-            self.panel("PANEL DE ANÁLISIS", rows)
-            self.line("[0 / r] Regresar al menú anterior", "90")
+            self.panel(tr("ANALYSIS PANEL"), rows)
+            self.line(tr("[0 / r] Back to the previous menu"), "90")
         else:
             self.center(title, "1;37")
         self.line()
@@ -281,9 +310,9 @@ class InteractiveApp:
             value = self.read().strip()
             if not self.tty:
                 self.out.write("\n")
-            if value.lower() in ("r", "regresar", "volver"):
+            if value.lower() in ("r", "back", "return", "regresar", "volver"):
                 if self.at_home:
-                    self.line("Ya estás en el menú principal. Usa 0 para salir.", "90")
+                    self.line(tr("You are already at the main menu. Use 0 to exit."), "90")
                     continue
                 raise Back()
             if value.isascii() and value.isdecimal():
@@ -295,7 +324,7 @@ class InteractiveApp:
             if not value and allow_empty:
                 return ""
             if not value:
-                self.line("Escribe un valor o 0 para volver.", "33")
+                self.line(tr("Type a value or 0 to go back."), "33")
                 continue
             try:
                 return validator(value) if validator else value
@@ -350,27 +379,28 @@ class InteractiveApp:
                 raise Back()
             if key == "r":
                 if self.at_home:
-                    self.line("Ya estás en el menú principal. Usa 0 para salir.", "90")
+                    self.line(tr("You are already at the main menu. Use 0 to exit."), "90")
                     continue
                 raise Back()
             if key in keys:
                 return key
             if key:
-                self.line("Opción no válida. Pulsa una de las teclas del menú; 0 para volver.", "33")
+                self.line(tr("Invalid option. Press one of the menu keys; 0 to go back."), "33")
 
-    def choose(self, keys, label="Elige una opción", default=None):
+    def choose(self, keys, label=None, default=None):
+        label = label or tr("Choose an option")
         if self.instant and all(len(key) == 1 for key in keys):
             return self.choose_key(keys, label, default)
 
         def validate(value):
             value = value.lower()
             if value not in keys:
-                raise ValueError("Opción no válida. Usa los números del menú; 0 para volver.")
+                raise ValueError(tr("Invalid option. Use the menu numbers; 0 to go back."))
             return value
         return self.ask(label, default, validate)
 
     def pause(self):
-        self.out.write("\n  [0 / r] Regresar · ENTER para continuar...")
+        self.out.write("\n  " + tr("[0 / r] Back · ENTER to continue..."))
         self.out.flush()
         self.read()
         if not self.tty:
@@ -403,21 +433,21 @@ class InteractiveApp:
                 except Back:
                     continue
             except KeyboardInterrupt:
-                self.line("Acción cancelada. Puedes elegir otra opción.", "33")
+                self.line(tr("Action cancelled. You can choose another option."), "33")
             except EOFError:
-                self.line("Sesión cerrada.")
+                self.line(tr("Session closed."))
                 return 0
 
     def target(self, args):
         if args.mode in self.core.URL_MODES:
-            self.line("URL completa con ruta. Ejemplo: https://example.com/login")
-            self.line("Solo se hacen peticiones GET: no se envían formularios ni credenciales.", "90")
-            raw = self.ask("URL (0 para volver)", self.last_target or None,
+            self.line(tr("Full URL with path. Example: https://example.com/login"))
+            self.line(tr("Only GET requests are made: no forms or credentials are submitted."), "90")
+            raw = self.ask(tr("URL (0 to go back)"), self.last_target or None,
                            validator=lambda value: (value, self.core.normalize_for_mode(value, args.mode)))
             self.last_target = raw[1]
             return raw[1]
-        self.line("Acepta dominio, IPv4, IPv6 o URL. Ejemplo: 192.168.88.1")
-        raw = self.ask("Objetivo (0 para volver)", self.last_target or None,
+        self.line(tr("Accepts a domain, IPv4, IPv6 or URL. Example: 192.168.88.1"))
+        raw = self.ask(tr("Target (0 to go back)"), self.last_target or None,
                        validator=lambda value: (value, self.core.normalize_target(value)))
         self.last_target = raw[1]
         if "://" in raw[0]:
@@ -437,10 +467,10 @@ class InteractiveApp:
 
     def version(self, required=False, default=None):
         import routeros
-        self.line("Versión de tu inventario. Ejemplos: 7.25, 7.23.8.")
+        self.line(tr("Version from your inventory. Examples: 7.25, 7.23.8."))
         if not required:
-            self.line("ENTER sin versión: se intentará detectar mediante banners públicos.")
-        return self.ask("Versión RouterOS (0 para volver)", default,
+            self.line(tr("ENTER without a version: it will try to detect it from public banners."))
+        return self.ask(tr("RouterOS version (0 to go back)"), default,
                         lambda value: routeros.parse_version(value).text,
                         allow_empty=not required) or None
 
@@ -459,9 +489,9 @@ class InteractiveApp:
         args = self.fresh_args(mode)
         if mode == "mikrotik":
             while True:
-                self.screen(MODE_LABELS[mode][0], "Paso 1 · Elige el tipo de revisión.")
-                self.item("1", "Revisar un router en la red", "Servicios accesibles, banners y avisos por versión")
-                self.item("2", "Revisar solo una versión", "Sin conexión a routers ni servicios de Internet")
+                self.screen(mode_label(mode), tr("Step 1 · Choose the type of review."))
+                self.item("1", tr("Check a router on the network"), tr("Reachable services, banners and advisories by version"))
+                self.item("2", tr("Check a version only"), tr("No connection to routers or Internet services"))
                 args.offline = self.choose({"1", "2"}, default="1") == "2"
                 try:
                     if args.offline:
@@ -474,12 +504,12 @@ class InteractiveApp:
                     continue
                 break
         else:
-            self.screen(MODE_LABELS[mode][0], "Paso 1 · Elige el objetivo.")
+            self.screen(mode_label(mode), tr("Step 1 · Choose the target."))
             targets = [self.target(args)]
         self.review(Plan(args, targets))
 
     def read_targets(self, path, mode=None):
-        """Objetivos válidos y sin duplicados de un archivo; en webapp se conservan las URL completas."""
+        """Valid, de-duplicated targets from a file; webapp keeps the full URLs."""
         lines = path.read_text(encoding="utf-8-sig").splitlines()
         targets, ignored = [], 0
         for line in lines:
@@ -494,7 +524,7 @@ class InteractiveApp:
             except (ValueError, UnicodeError):
                 ignored += 1
         if not targets:
-            raise ValueError("El archivo no contiene objetivos válidos.")
+            raise ValueError(tr("The file contains no valid targets."))
         return targets, ignored
 
     def load_batch(self, mode=None):
@@ -502,72 +532,82 @@ class InteractiveApp:
             path = Path(value.strip('"')).expanduser()
             targets, ignored = self.read_targets(path, mode)
             return path, targets, ignored
-        self.line("Archivo UTF-8 con un objetivo por línea; se omiten comentarios y duplicados.")
-        return self.ask("Ruta del archivo (0 para volver)", validator=validate)
+        self.line(tr("UTF-8 file with one target per line; comments and duplicates are skipped."))
+        return self.ask(tr("File path (0 to go back)"), validator=validate)
 
     def batch_wizard(self):
-        self.screen("Varios objetivos", "Paso 1 · Carga tu archivo. 0 para volver.")
+        self.screen(tr("Several targets"), tr("Step 1 · Load your file. 0 to go back."))
         path, targets, ignored = self.load_batch()
-        self.line(f"{len(targets)} objetivos preparados; {ignored} líneas inválidas o duplicadas omitidas.", "32")
+        self.line(tr("{targets} targets ready; {ignored} invalid or duplicate lines skipped.",
+                     targets=len(targets), ignored=ignored), "32")
         for key, mode in MODE_KEYS.items():
-            self.item(key, *MODE_LABELS[mode])
-        mode = MODE_KEYS[self.choose(MODE_KEYS, "Tipo de auditoría", "1")]
+            self.item(key, mode_label(mode), tr(MODE_LABELS[mode][1]))
+        mode = MODE_KEYS[self.choose(MODE_KEYS, tr("Type of audit"), "1")]
         if mode in self.core.URL_MODES:
             try:
                 targets, ignored = self.read_targets(path, mode)
             except (OSError, ValueError, UnicodeError) as exc:
-                self.line(f"No se puede usar este archivo en {MODE_LABELS[mode][0]}: {exc}", "33")
+                self.line(tr("This file cannot be used in {mode}: {error}", mode=mode_label(mode), error=exc), "33")
                 self.pause()
                 return
         args = self.fresh_args(mode)
         args.file = path
         if mode == "mikrotik":
-            self.line("La versión indicada se aplicará a todos los equipos; déjala vacía si difieren.")
+            self.line(tr("The version you give applies to every device; leave it empty if they differ."))
             args.routeros_version = self.version()
         self.review(Plan(args, targets, batch=True, ignored=ignored))
 
     def review(self, plan):
         while True:
             args = plan.args
-            self.screen("Todo listo para revisar", "Paso 2 · Revisa las opciones y elige Iniciar.")
-            self.line("Auditoría: " + MODE_LABELS[args.mode][0], "1;37")
+            self.screen(tr("Ready to review"), tr("Step 2 · Check the options and choose Start."))
+            self.line(tr("Audit: {mode}", mode=mode_label(args.mode)), "1;37")
             if args.offline:
-                self.line("Objetivo: versión RouterOS, sin conexiones de red")
+                self.line(tr("Target: RouterOS version, no network connections"))
             elif plan.batch:
-                self.line(f"Archivo: {args.file}")
-                self.line(f"Objetivos: {len(plan.targets)} · omitidos/duplicados: {plan.ignored}")
-                self.line("Vista previa: " + ", ".join(plan.targets[:4]))
+                self.line(tr("File: {path}", path=args.file))
+                self.line(tr("Targets: {count} · skipped/duplicates: {ignored}",
+                             count=len(plan.targets), ignored=plan.ignored))
+                self.line(tr("Preview: {targets}", targets=", ".join(plan.targets[:4])))
             else:
-                self.line("Objetivo: " + plan.targets[0])
+                self.line(tr("Target: {target}", target=plan.targets[0]))
             if args.mode == "mikrotik":
-                self.line("RouterOS: " + (args.routeros_version or "detección por banners; puede no publicarse"))
-            self.line(f"Tiempo por conexión: {args.timeout:g} s · conexiones: {args.threads}")
+                self.line(tr("RouterOS: {version}", version=args.routeros_version
+                             or tr("detection from banners; it may not be published")))
+            self.line(tr("Time per connection: {timeout} s · connections: {threads}",
+                         timeout=f"{args.timeout:g}", threads=args.threads))
             if args.mode in ("web", "full", "mikrotik") and not args.offline:
-                self.line(f"Web: {args.scheme.upper()} · puerto {args.web_port or 'predeterminado'}")
+                self.line(tr("Web: {scheme} · port {port}", scheme=args.scheme.upper(),
+                             port=args.web_port or tr("default")))
             if args.mode in ("ports", "full", "mikrotik") and not args.offline:
-                self.line("Puertos TCP: " + (", ".join(map(str, args.ports)) if args.ports else "lista recomendada del modo"))
+                self.line(tr("TCP ports: {ports}", ports=", ".join(map(str, args.ports)) if args.ports
+                             else tr("the mode's recommended list")))
             if args.mode in self.core.URL_MODES:
                 extra = getattr(args, "scope", None) or []
-                self.line("Alcance: el host de la URL" + (" + " + ", ".join(extra) if extra else "")
-                          + "; redirecciones fuera de él no se siguen")
-                self.line("Solo peticiones GET: no se envían formularios ni credenciales.", "90")
-            active = [MODULE_LABELS[name] for name in self.core.MODES[args.mode] if name not in args.skip]
-            self.line("Módulos: " + (", ".join(active) or "ninguno seleccionado"))
+                if extra:
+                    self.line(tr("Scope: the URL's host + {hosts}; redirects outside it are not followed",
+                                 hosts=", ".join(extra)))
+                else:
+                    self.line(tr("Scope: the URL's host; redirects outside it are not followed"))
+                self.line(tr("GET requests only: no forms or credentials are submitted."), "90")
+            active = [module_label(name) for name in self.core.MODES[args.mode] if name not in args.skip]
+            self.line(tr("Modules: {modules}", modules=", ".join(active) or tr("none selected")))
             if "rdap" in self.core.MODES[args.mode] and "rdap" not in args.skip:
-                self.line("RDAP consultará el registro del objetivo a través de rdap.org.", "90")
-            self.line(f"Reportes: {args.output} · {args.format.upper()}")
+                self.line(tr("RDAP will look up the target's registration through rdap.org."), "90")
+            self.line(tr("Reports: {folder} · {format}", folder=args.output, format=args.format.upper()))
             self.line()
-            self.item("1", "Iniciar auditoría")
-            self.item("2", "Cambiar versión" if args.offline else "Cambiar archivo" if plan.batch else "Cambiar objetivo")
-            self.item("3", "Ajustar opciones para esta auditoría")
+            self.item("1", tr("Start audit"))
+            self.item("2", tr("Change version") if args.offline else tr("Change file") if plan.batch
+                      else tr("Change target"))
+            self.item("3", tr("Adjust options for this audit"))
             if args.mode == "mikrotik" and not args.offline:
-                self.item("4", "Indicar o cambiar versión RouterOS")
-            self.item("0", "Volver al menú principal")
+                self.item("4", tr("Set or change the RouterOS version"))
+            self.item("0", tr("Back to the main menu"))
             allowed = {"1", "2", "3"} | ({"4"} if args.mode == "mikrotik" and not args.offline else set())
             choice = self.choose(allowed, default="1")
             if choice == "1":
                 if not active:
-                    self.line("Activa al menos un módulo desde Ajustar opciones.", "33")
+                    self.line(tr("Enable at least one module from Adjust options."), "33")
                     self.pause()
                     continue
                 self.execute(plan)
@@ -592,61 +632,74 @@ class InteractiveApp:
 
     def preferences(self, args, local=False):
         while True:
-            self.screen("Opciones de esta auditoría" if local else "Preferencias de la sesión",
-                        "Los cambios se aplican al volver; 0 para volver.")
-            self.item("1", f"Tiempo por conexión: {args.timeout:g} segundos")
-            self.item("2", f"Conexiones simultáneas: {args.threads}")
-            self.item("3", f"Carpeta de reportes: {args.output}")
-            self.item("4", f"Formato: {args.format.upper()}")
+            self.screen(tr("Options for this audit") if local else tr("Session preferences"),
+                        tr("Changes apply when you go back; 0 to go back."))
+            self.item("1", tr("Time per connection: {timeout} seconds", timeout=f"{args.timeout:g}"))
+            self.item("2", tr("Simultaneous connections: {threads}", threads=args.threads))
+            self.item("3", tr("Reports folder: {folder}", folder=args.output))
+            self.item("4", tr("Format: {format}", format=args.format.upper()))
             if local and not args.offline:
-                self.item("5", "Puertos TCP: " + (", ".join(map(str, args.ports)) if args.ports else "recomendados"))
-                self.item("6", f"Web: {args.scheme.upper()} · puerto {args.web_port or 'predeterminado'}")
-                self.item("7", "Elegir módulos")
+                self.item("5", tr("TCP ports: {ports}", ports=", ".join(map(str, args.ports)) if args.ports
+                                  else tr("recommended")))
+                self.item("6", tr("Web: {scheme} · port {port}", scheme=args.scheme.upper(),
+                                  port=args.web_port or tr("default")))
+                self.item("7", tr("Choose modules"))
                 if args.mode == "mikrotik":
-                    self.item("8", f"Puerto SSH: {args.ssh_port}")
-            self.item("d", "Restablecer valores predeterminados")
-            self.item("0", "Guardar y volver")
+                    self.item("8", tr("SSH port: {port}", port=args.ssh_port))
+            if not local:
+                self.item("l", tr("Language: {language}", language=LANGUAGE_NAMES[i18n.language()]))
+            self.item("d", tr("Restore default values"))
+            self.item("0", tr("Save and go back"))
             keys = {"1", "2", "3", "4", "d"}
             if local and not args.offline:
                 keys |= {"5", "6", "7"}
                 if args.mode == "mikrotik":
                     keys.add("8")
+            if not local:
+                keys.add("l")
             try:
                 choice = self.choose(keys)
             except Back:
                 return
             try:
                 if choice == "1":
-                    args.timeout = self.ask("Segundos (0.1 a 60)", args.timeout, self.core.timeout_value)
+                    args.timeout = self.ask(tr("Seconds (0.1 to 60)"), args.timeout, self.core.timeout_value)
                 elif choice == "2":
-                    args.threads = self.ask("Conexiones (1 a 64)", args.threads, self.core.bounded_int(1, 64))
+                    args.threads = self.ask(tr("Connections (1 to 64)"), args.threads, self.core.bounded_int(1, 64))
                 elif choice == "3":
                     def directory(value):
                         path = Path(value.strip('"')).expanduser()
                         if path.exists() and not path.is_dir():
-                            raise ValueError("Esa ruta es un archivo. Elige una carpeta.")
+                            raise ValueError(tr("That path is a file. Choose a folder."))
                         return path
-                    args.output = self.ask("Carpeta", str(args.output), directory)
+                    args.output = self.ask(tr("Folder"), str(args.output), directory)
                 elif choice == "4":
-                    for key, label in (("1", "Todos: HTML + JSON + TXT"), ("2", "Solo HTML"),
-                                       ("3", "Solo JSON"), ("4", "Solo TXT")):
+                    for key, label in (("1", tr("All: HTML + JSON + TXT")), ("2", tr("HTML only")),
+                                       ("3", tr("JSON only")), ("4", tr("TXT only"))):
                         self.item(key, label)
                     args.format = {"1": "all", "2": "html", "3": "json", "4": "txt"}[self.choose({"1", "2", "3", "4"})]
                 elif choice == "5":
-                    self.line("Ejemplo: 22,80,443. Escribe auto para la lista recomendada.")
-                    raw = self.ask("Puertos", validator=lambda value: None if value.lower() == "auto" else self.core.port_list(value))
+                    self.line(tr("Example: 22,80,443. Type auto for the recommended list."))
+                    raw = self.ask(tr("Ports"), validator=lambda value: None if value.lower() == "auto" else self.core.port_list(value))
                     args.ports = raw
                 elif choice == "6":
-                    self.item("1", "HTTPS (cifrado)")
+                    self.item("1", tr("HTTPS (encrypted)"))
                     self.item("2", "HTTP")
                     scheme = {"1": "https", "2": "http"}[self.choose({"1", "2"})]
-                    port = self.ask("Puerto web (auto para predeterminado)", "auto",
+                    port = self.ask(tr("Web port (auto for the default)"), "auto",
                                     lambda value: None if value.lower() == "auto" else self.core.bounded_int(1, 65535)(value))
                     self.set_web(args, scheme, port)
                 elif choice == "7":
                     self.module_picker(args)
                 elif choice == "8":
-                    args.ssh_port = self.ask("Puerto SSH", args.ssh_port, self.core.bounded_int(1, 65535))
+                    args.ssh_port = self.ask(tr("SSH port"), args.ssh_port, self.core.bounded_int(1, 65535))
+                elif choice == "l":
+                    self.item("1", LANGUAGE_NAMES["en"])
+                    self.item("2", LANGUAGE_NAMES["es"])
+                    current = "2" if i18n.language() == "es" else "1"
+                    language = {"1": "en", "2": "es"}[self.choose({"1", "2"}, default=current)]
+                    i18n.set_language(language)
+                    args.lang = language
                 else:
                     clean = self.core.parser().parse_args([])
                     for name in ("timeout", "threads", "output", "format", "ports", "scheme", "web_port", "ssh_port", "skip"):
@@ -656,10 +709,10 @@ class InteractiveApp:
 
     def module_picker(self, args):
         while True:
-            self.screen("Módulos de la auditoría", "Selecciona uno para activarlo/desactivarlo. 0 para volver.")
+            self.screen(tr("Audit modules"), tr("Select one to enable/disable it. 0 to go back."))
             modules = self.core.MODES[args.mode]
             for index, name in enumerate(modules, 1):
-                self.item(str(index), f"[{' ' if name in args.skip else 'x'}] {MODULE_LABELS[name]}")
+                self.item(str(index), f"[{' ' if name in args.skip else 'x'}] {module_label(name)}")
             try:
                 key = self.choose({str(index) for index in range(1, len(modules) + 1)})
             except Back:
@@ -673,15 +726,16 @@ class InteractiveApp:
                 args.skip.append(name)
 
     def execute(self, plan):
-        self.screen("Auditoría en curso", "Los resultados terminados se guardan aunque canceles después.")
+        self.screen(tr("Audit in progress"), tr("Finished results are saved even if you cancel later."))
         completed_count = 0
         last_entry = None
         for index, target in enumerate(plan.targets, 1):
-            self.line(f"Objetivo {index}/{len(plan.targets)} · {target}", "1;36")
+            self.line(tr("Target {index}/{total} · {target}", index=index, total=len(plan.targets),
+                         target=target), "1;36")
 
             def progress(name, status, position, total):
-                labels = {"running": "EN CURSO", "ok": "LISTO", "error": "ERROR", "skipped": "OMITIDO"}
-                text = f"[{position}/{total}] {MODULE_LABELS.get(name, name)} · {labels[status]}"
+                labels = {"running": "RUNNING", "ok": "DONE", "error": "ERROR", "skipped": "SKIPPED"}
+                text = f"[{position}/{total}] {module_label(name)} · {tr(labels[status])}"
                 if self.tty:
                     self.out.write("\r\033[2K" if self.color else "\r" + " " * (self.width - 1) + "\r")
                     self.out.write("  " + self.style(text[:self.width - 4], "33" if status == "error" else "36"))
@@ -696,7 +750,7 @@ class InteractiveApp:
             try:
                 paths = self.core.save_report(report, plan.args.output, formats)
             except OSError as exc:
-                self.line(f"No se pudieron guardar los reportes: {exc}", "33")
+                self.line(tr("Could not save the reports: {error}", error=exc), "33")
                 paths = []
             entry = {"report": report, "paths": paths}
             self.history.append(entry)
@@ -705,12 +759,13 @@ class InteractiveApp:
             last_entry = entry
             self.summary(report)
             for path in paths:
-                self.line(f"Guardado: {path}", "90")
+                self.line(tr("Saved: {path}", path=path), "90")
             self.line()
         if completed_count == 1:
             self.viewer(last_entry)
         else:
-            self.line(f"Batch terminado: {completed_count} objetivos. Consulta los recientes en Mis reportes.", "32")
+            self.line(tr("Batch finished: {count} targets. See the recent ones in My reports.",
+                         count=completed_count), "32")
             self.pause()
 
     def summary(self, report):
@@ -718,284 +773,337 @@ class InteractiveApp:
         errors = sum(item.get("status") == "error" for item in modules.values())
         done = sum(item.get("status") == "ok" for item in modules.values())
         skipped = sum(item.get("status") == "skipped" for item in modules.values())
-        self.panel("RESUMEN", [(f"Comprobaciones: {done} terminadas / {errors} con error / {skipped} omitidas",
-                                "33" if errors else "32")])
+        self.panel(tr("SUMMARY"), [(tr("Checks: {done} finished / {errors} with errors / {skipped} skipped",
+                                       done=done, errors=errors, skipped=skipped),
+                                    "33" if errors else "32")])
         score = report.get("score")
         if isinstance(score, dict) and score.get("grade"):
             counts = {level: sum(f["severity"] == level for f in score.get("findings", []))
-                      for level in ("alta", "media", "baja")}
+                      for level in ("high", "medium", "low")}
             color = "32" if score["grade"] in ("A", "B") else "33" if score["grade"] == "C" else "1;31"
-            self.line(f"Nota de seguridad: {score['grade']} ({score['score']}/100) · "
-                      f"{counts['alta']} altos, {counts['media']} medios, {counts['baja']} bajos", color)
+            self.line(tr("Security grade: {grade} ({score}/100) · {high} high, {medium} medium, {low} low",
+                         grade=score["grade"], score=score["score"], high=counts["high"],
+                         medium=counts["medium"], low=counts["low"]), color)
             for finding in score.get("findings", [])[:5]:
-                if finding["severity"] in ("alta", "media"):
-                    self.line(f"  [{SEVERITY_LABELS[finding['severity']]}] {finding['title']}",
-                              SEVERITY_COLORS[finding["severity"]])
+                if finding["severity"] in ("high", "medium"):
+                    self.line(f"  [{severity_label(finding['severity'])}] {finding['title']}",
+                              severity_color(finding["severity"]))
         for name, item in modules.items():
             self.module_summary(name, item)
 
     def module_summary(self, name, item):
-        label = MODULE_LABELS.get(name, name)
+        label = module_label(name)
         if item.get("status") == "error":
-            self.line(f"{label}: {self.explain_error(item.get('error', 'sin detalle'))}", "33")
+            self.line(f"{label}: {self.explain_error(item.get('error', tr('no details')))}", "33")
             return
         if item.get("status") == "skipped":
-            self.line(f"{label}: omitido" + (f" ({item['reason']})" if item.get("reason") else ""), "90")
+            if item.get("reason"):
+                self.line(tr("{module}: skipped ({reason})", module=label, reason=item["reason"]), "90")
+            else:
+                self.line(tr("{module}: skipped", module=label), "90")
             return
         data = item.get("data", {})
         if not isinstance(data, dict):
             return
         if name == "dns":
-            self.line("Direcciones: " + (", ".join(data.get("addresses", [])) or "ninguna"))
+            self.line(tr("Addresses: {addresses}", addresses=", ".join(data.get("addresses", [])) or tr("none")))
             records = data.get("records") or {}
             if records.get("NS"):
-                self.line("Servidores DNS: " + ", ".join(records["NS"][:4]))
+                self.line(tr("DNS servers: {servers}", servers=", ".join(records["NS"][:4])))
             if records.get("MX"):
-                self.line("Correo (MX): " + ", ".join(f"{r['host']} ({r['priority']})" for r in records["MX"][:4]
-                                                     if isinstance(r, dict)))
+                self.line(tr("Mail (MX): {hosts}", hosts=", ".join(f"{r['host']} ({r['priority']})"
+                                                                   for r in records["MX"][:4] if isinstance(r, dict))))
             if records.get("CNAME"):
-                self.line("Alias (CNAME): " + ", ".join(records["CNAME"]))
+                self.line(tr("Alias (CNAME): {names}", names=", ".join(records["CNAME"])))
             if data.get("records") is not None:
-                self.line(f"DNSSEC: {'activo' if data.get('dnssec') else 'no'} · CAA: "
-                          + ("sí" if records.get("CAA") else "no"), "32" if data.get("dnssec") else None)
+                self.line(tr("DNSSEC: {dnssec} · CAA: {caa}",
+                             dnssec=tr("active") if data.get("dnssec") else tr("no"),
+                             caa=tr("yes") if records.get("CAA") else tr("no")),
+                          "32" if data.get("dnssec") else None)
             if data.get("ptr"):
-                self.line("Nombre inverso: " + ", ".join(data["ptr"]))
+                self.line(tr("Reverse name: {names}", names=", ".join(data["ptr"])))
         elif name == "rdap":
-            self.line("Registro: " + str(data.get("name") or data.get("ldhName") or data.get("handle")
-                                         or "respuesta disponible en el reporte")
-                      + (f" · estado: {', '.join(data['status'][:3])}" if isinstance(data.get("status"), list) and data["status"] else ""))
+            registration = str(data.get("name") or data.get("ldhName") or data.get("handle")
+                               or tr("response available in the report"))
+            if isinstance(data.get("status"), list) and data["status"]:
+                self.line(tr("Registration: {name} · status: {status}", name=registration,
+                             status=", ".join(data["status"][:3])))
+            else:
+                self.line(tr("Registration: {name}", name=registration))
         elif name == "http":
             status = data.get("status", "?")
             color = "32" if str(status).startswith("2") else "36" if str(status).startswith("3") else "33"
-            self.line(f"HTTP: {status} · {data.get('title') or 'sin título'}", color)
+            self.line(f"HTTP: {status} · {data.get('title') or tr('no title')}", color)
             missing = data.get("missing_headers", [])
-            self.line("Cabeceras recomendadas ausentes: " + (", ".join(missing) if missing else "ninguna de las comprobadas"))
+            self.line(tr("Recommended headers missing: {headers}",
+                         headers=", ".join(missing) if missing else tr("none of those checked")))
         elif name == "tls":
             self.tls_summary(data)
         elif name == "ports":
             rows = data.get("results", [])
             opened = [row.get("port") for row in rows if row.get("state") == "open"]
-            self.line("Puertos TCP accesibles: " + (", ".join(service_label(port) for port in opened)
-                                                    if opened else "ninguno en la lista revisada"),
+            self.line(tr("Reachable TCP ports: {ports}",
+                         ports=", ".join(service_label(port) for port in opened) if opened
+                         else tr("none in the reviewed list")),
                       "32" if opened else None)
             if rows:
-                self.line(f"Sin respuesta: {len(rows) - len(opened)} de {len(rows)} puertos revisados", "90")
+                self.line(tr("No answer: {closed} of {total} ports reviewed",
+                             closed=len(rows) - len(opened), total=len(rows)), "90")
         elif name == "traceroute":
-            self.line("Ruta de red: " + (data.get("reason", "no disponible") if data.get("status") == "unavailable" else "disponible en el detalle"))
+            self.line(tr("Network route: {route}",
+                         route=data.get("reason", tr("not available")) if data.get("status") == "unavailable"
+                         else tr("available in the details")))
         elif name == "mikrotik":
             self.routeros_summary(data)
         elif name == "asn":
             groups = {}
             for row in data.get("networks", []):
                 key = (f"AS{row['asn']} {row.get('as_name') or ''} · {row.get('country') or '?'}".strip()
-                       if row.get("asn") else (row.get("note") or row.get("error") or "sin datos públicos"))
+                       if row.get("asn") else (row.get("note") or row.get("error") or tr("no public data")))
                 groups.setdefault(key, []).append(row)
             for key, rows in groups.items():
                 ptrs = sorted({r["ptr"] for r in rows if r.get("ptr")})
-                ips = ", ".join(r["ip"] for r in rows[:3]) + (f" y {len(rows) - 3} más" if len(rows) > 3 else "")
-                self.line(f"Red: {key} · {ips}" + (f" · {', '.join(ptrs[:2])}" if ptrs else ""),
+                ips = ", ".join(r["ip"] for r in rows[:3])
+                if len(rows) > 3:
+                    ips = tr("{ips} and {count} more", ips=ips, count=len(rows) - 3)
+                self.line(tr("Network: {network} · {ips}", network=key, ips=ips)
+                          + (f" · {', '.join(ptrs[:2])}" if ptrs else ""),
                           None if rows[0].get("asn") else "90")
         elif name == "mail":
             color = "1;31" if data.get("spoofable") else "32" if data.get("grade", "").startswith("A") else "33"
-            self.line(f"Correo: nota {data.get('grade')} · "
-                      + ("SE PUEDE SUPLANTAR (DMARC no bloquea correos falsos)" if data.get("spoofable")
-                         else "protegido contra suplantación"), color)
+            if data.get("spoofable"):
+                self.line(tr("Mail: grade {grade} · CAN BE SPOOFED (DMARC does not block fake mail)",
+                             grade=data.get("grade")), color)
+            else:
+                self.line(tr("Mail: grade {grade} · protected against spoofing", grade=data.get("grade")), color)
             spf, dmarc = data.get("spf", {}), data.get("dmarc", {})
-            self.line(f"SPF: {spf.get('all') or ('sin -all' if spf.get('present') else 'ausente')} · DMARC: "
-                      f"{dmarc.get('policy') or 'ausente'} · DKIM: "
-                      + (", ".join(data.get("dkim", {}).get("selectors_found", [])) or "no encontrado")
-                      + f" · MTA-STS: {data.get('mta_sts', {}).get('mode') or 'no'}")
+            self.line(tr("SPF: {spf} · DMARC: {dmarc} · DKIM: {dkim} · MTA-STS: {mta_sts}",
+                         spf=spf.get("all") or (tr("no -all") if spf.get("present") else tr("missing")),
+                         dmarc=dmarc.get("policy") or tr("missing"),
+                         dkim=", ".join(data.get("dkim", {}).get("selectors_found", [])) or tr("not found"),
+                         mta_sts=data.get("mta_sts", {}).get("mode") or tr("no")))
             if not data.get("accepts_mail"):
-                self.line("El dominio no recibe correo (sin MX o MX nulo).", "90")
+                self.line(tr("The domain does not receive mail (no MX or null MX)."), "90")
         elif name == "tech":
             grade = data.get("headers_grade", {})
-            tech = ", ".join(t["name"] for t in data.get("technologies", [])) or "no identificadas"
-            self.line(f"Web: {data.get('status')} · cabeceras de seguridad: nota {grade.get('grade')} ({grade.get('points')}/100)",
+            tech = ", ".join(t["name"] for t in data.get("technologies", [])) or tr("none identified")
+            self.line(tr("Web: {status} · security headers: grade {grade} ({points}/100)",
+                         status=data.get("status"), grade=grade.get("grade"), points=grade.get("points")),
                       "32" if grade.get("grade") in ("A", "B") else "33")
-            self.line("Tecnologías: " + tech + (f" · generador: {data['generator']}" if data.get("generator") else ""))
+            if data.get("generator"):
+                self.line(tr("Technologies: {list} · generator: {generator}", list=tech,
+                             generator=data["generator"]))
+            else:
+                self.line(tr("Technologies: {list}", list=tech))
             if data.get("favicon"):
-                self.line(f"Favicon: {data['favicon']['shodan']} (búscalo en Shodan para hallar servidores iguales)", "90")
+                self.line(tr("Favicon: {hash} (search it in Shodan to find identical servers)",
+                             hash=data["favicon"]["shodan"]), "90")
             extra = []
             if data.get("security_txt"):
-                extra.append("security.txt publicado")
+                extra.append(tr("security.txt published"))
             if data.get("redirects"):
-                extra.append(f"{len(data['redirects'])} redirecciones")
+                extra.append(tr("{count} redirects", count=len(data["redirects"])))
             weak = [c["name"] for c in data.get("cookies", []) if c.get("issues")]
             if weak:
-                extra.append(f"{len(weak)} cookies sin protecciones")
+                extra.append(tr("{count} cookies without protections", count=len(weak)))
             if extra:
                 self.line(" · ".join(extra), "90")
         elif name == "subdomains":
             alive = data.get("alive", [])
-            self.line(f"Subdominios: {data.get('total', 0)} encontrados ({', '.join(data.get('sources', [])) or 'sin fuente'})"
-                      f" · {len(alive)} activos", "32" if data.get("total") else None)
+            self.line(tr("Subdomains: {total} found ({sources}) · {alive} active", total=data.get("total", 0),
+                         sources=", ".join(data.get("sources", [])) or tr("no source"), alive=len(alive)),
+                      "32" if data.get("total") else None)
             for row in data.get("takeover", []):
                 risk = row["takeover"]["risk"]
-                self.line(f"[{'TOMA POSIBLE' if risk != 'revisar' else 'REVISAR'}] {row['name']} → {row.get('cname')} · "
-                          f"{row['takeover']['reason']}", "1;31" if risk == "alto" else "33")
+                tag = tr("POSSIBLE TAKEOVER") if risk != "review" else tr("REVIEW")
+                self.line(f"[{tag}] {row['name']} → {row.get('cname')} · {row['takeover']['reason']}",
+                          "1;31" if risk == "high" else "33")
             if data.get("warning"):
                 self.line(data["warning"], "33")
         elif name == "history":
             parts = []
             if data.get("registered"):
-                parts.append(f"registrado el {data['registered']} ({data.get('age_days')} días)")
+                parts.append(tr("registered on {date} ({days} days)", date=data["registered"],
+                                days=data.get("age_days")))
             if data.get("expires"):
-                parts.append(f"caduca el {data['expires']}")
+                parts.append(tr("expires on {date}", date=data["expires"]))
             if data.get("registrar"):
-                parts.append(f"registrador: {data['registrar']}")
-            self.line("Dominio: " + (" · ".join(parts) or "sin fechas de registro públicas"),
+                parts.append(tr("registrar: {name}", name=data["registrar"]))
+            self.line(tr("Domain: {details}", details=" · ".join(parts) or tr("no public registration dates")),
                       "33" if data.get("new_domain") else None)
             if data.get("new_domain"):
-                self.line("Dominio reciente: es una señal habitual de sitios de phishing.", "33")
+                self.line(tr("Recent domain: a common sign of phishing sites."), "33")
             wb = data.get("wayback") or {}
             if wb.get("first_capture"):
-                self.line(f"Wayback Machine: primera captura {wb['first_capture']} · última {wb.get('last_capture')}", "90")
+                self.line(tr("Wayback Machine: first capture {first} · last {last}",
+                             first=wb["first_capture"], last=wb.get("last_capture")), "90")
         elif name == "lookalike":
             rows = data.get("registered", [])
-            self.line(f"Dominios parecidos: {len(rows)} registrados de {data.get('checked')} variantes · "
-                      f"{data.get('with_mail', 0)} reciben correo", "33" if data.get("with_mail") else None)
+            self.line(tr("Lookalike domains: {registered} registered out of {checked} variants · "
+                         "{mail} receive mail", registered=len(rows), checked=data.get("checked"),
+                         mail=data.get("with_mail", 0)), "33" if data.get("with_mail") else None)
             for row in rows[:6]:
-                self.line(f"  {row['domain']} ({row.get('kind')})" + (" · recibe correo" if row.get("mx") else ""),
+                self.line(f"  {row['domain']} ({row.get('kind')})" + (" · " + tr("receives mail") if row.get("mx") else ""),
                           "33" if row.get("mx") else "90")
         elif name == "webapp":
             self.webapp_summary(data)
 
     def webapp_summary(self, data):
         status = data.get("status")
-        self.line(f"URL: {data.get('final_url')} · HTTP {status} · {data.get('title') or 'sin título'}",
+        self.line(tr("URL: {url} · HTTP {status} · {title}", url=data.get("final_url"), status=status,
+                     title=data.get("title") or tr("no title")),
                   "32" if str(status).startswith("2") else "33")
         root = data.get("root_comparison") or {}
         if root.get("same_as_target"):
-            self.line("Raíz del sitio: es la misma URL auditada", "90")
+            self.line(tr("Site root: it is the same URL being audited"), "90")
         elif root.get("error"):
-            self.line(f"Raíz del sitio: no comparada ({root['error']})", "90")
+            self.line(tr("Site root: not compared ({error})", error=root["error"]), "90")
         elif root:
-            self.line(f"Raíz del sitio: HTTP {root.get('status')} · {root.get('title') or 'sin título'} · "
-                      + ("contenido distinto al de la URL pedida" if root.get("differs")
-                         else "MISMO contenido que la URL pedida (revisa si la ruta existe)"),
-                      "90" if root.get("differs") else "33")
+            if root.get("differs"):
+                self.line(tr("Site root: HTTP {status} · {title} · content differs from the requested URL",
+                             status=root.get("status"), title=root.get("title") or tr("no title")), "90")
+            else:
+                self.line(tr("Site root: HTTP {status} · {title} · SAME content as the requested URL "
+                             "(check whether the path exists)",
+                             status=root.get("status"), title=root.get("title") or tr("no title")), "33")
         for hop in data.get("redirects", []):
-            self.line(f"Redirección {hop.get('status')} → {hop.get('location')}"
-                      + (f" · NO SEGUIDA: {hop['blocked']}" if hop.get("blocked") else ""),
-                      "33" if hop.get("blocked") or hop.get("downgrade") else "90")
+            text = tr("Redirect {status} → {location}", status=hop.get("status"), location=hop.get("location"))
+            if hop.get("blocked"):
+                text += " · " + tr("NOT FOLLOWED: {reason}", reason=hop["blocked"])
+            self.line(text, "33" if hop.get("blocked") or hop.get("downgrade") else "90")
         score = data.get("assessment") or {}
         if score:
-            self.line(f"Seguridad {score.get('security')}/100 · cobertura {score.get('coverage')}% · "
-                      f"confianza {score.get('confidence')}%")
+            self.line(tr("Security {security}/100 · Coverage {coverage}% · Confidence {confidence}%",
+                         security=score.get("security"), coverage=score.get("coverage"),
+                         confidence=score.get("confidence")))
         for form in data.get("forms", [])[:6]:
-            kind = "login" if form.get("login") else "formulario"
+            kind = tr("login") if form.get("login") else tr("form")
             fields = ", ".join(form.get("user_fields", []) + form.get("password_fields", []))
-            self.line(f"Formulario {form['index']} ({kind}): {form['method']} → {form['action']}"
-                      + (f" · campos {fields}" if fields else "")
-                      + f" · CSRF: {CSRF_LABELS.get(form['csrf']['state'], form['csrf']['state'])}")
+            csrf = form["csrf"]["state"]
+            text = tr("Form {index} ({kind}): {method} → {action}", index=form["index"], kind=kind,
+                      method=form["method"], action=form["action"])
+            if fields:
+                text += " · " + tr("fields {fields}", fields=fields)
+            self.line(text + " · CSRF: " + (tr(CSRF_LABELS[csrf]) if csrf in CSRF_LABELS else str(csrf)))
         cookies = data.get("cookies", [])
         if cookies:
-            self.line("Cookies: " + ", ".join(
+            self.line(tr("Cookies: {cookies}  (S=Secure, H=HttpOnly)", cookies=", ".join(
                 f"{c['name']} [{'S' if c['secure'] else '-'}{'H' if c['httponly'] else '-'} "
-                f"{c['samesite'] or 'sin SameSite'}]" for c in cookies[:6]) + "  (S=Secure, H=HttpOnly)", "90")
-        relevant = [f for f in data.get("findings", []) if f.get("status") in ("confirmado", "probable", "pendiente")]
+                f"{c['samesite'] or tr('no SameSite')}]" for c in cookies[:6])), "90")
+        relevant = [f for f in data.get("findings", []) if f.get("status") in ("confirmed", "likely", "pending")]
         for item in relevant[:10]:
-            self.line(f"[{SEVERITY_LABELS[item['severity']]}·{STATUS_LABELS[item['status']]}] {item['title']}",
-                      SEVERITY_COLORS[item["severity"]] if item["status"] != "pendiente" else "33")
+            self.line(f"[{severity_label(item['severity'])}·{status_label(item['status'])}] {item['title']}",
+                      severity_color(item["severity"]) if item["status"] != "pending" else "33")
         if len(relevant) > 10:
-            self.line(f"… y {len(relevant) - 10} más en el reporte", "90")
+            self.line(tr("… and {count} more in the report", count=len(relevant) - 10), "90")
         if not relevant:
-            self.line("Sin hallazgos confirmados ni pendientes en las comprobaciones pasivas.", "32")
+            self.line(tr("No confirmed or pending findings in the passive checks."), "32")
 
     def tls_summary(self, data):
         if data.get("verified") is False:
-            self.line(f"TLS: {data.get('protocol')} · CERTIFICADO NO VÁLIDO: {data.get('verify_error')}", "1;31")
+            self.line(tr("TLS: {protocol} · INVALID CERTIFICATE: {error}", protocol=data.get("protocol"),
+                         error=data.get("verify_error")), "1;31")
             if data.get("issuer"):
-                self.line(f"Emitido por {data.get('issuer')} para {data.get('subject')}"
-                          + (" (autofirmado)" if data.get("self_signed") else ""), "90")
+                text = tr("Issued by {issuer} for {subject}", issuer=data.get("issuer"), subject=data.get("subject"))
+                self.line(text + (" " + tr("(self-signed)") if data.get("self_signed") else ""), "90")
         versions = data.get("versions") or {}
         if versions:
             accepted = [v.replace("TLSv", "") for v, ok in versions.items() if ok]
             old = [v for v in ("TLSv1.0", "TLSv1.1") if versions.get(v)]
-            self.line("Versiones TLS aceptadas: " + (", ".join(accepted) or "ninguna")
-                      + (" · acepta versiones antiguas" if old else ""), "33" if old else "90")
+            self.line(tr("Accepted TLS versions: {versions}", versions=", ".join(accepted) or tr("none"))
+                      + (" · " + tr("accepts old versions") if old else ""), "33" if old else "90")
         if data.get("verified") is False:
             return
         days, expires = data.get("days_remaining"), data.get("expires")
-        when = f"caduca el {expires}" if expires else "fecha de caducidad no disponible"
+        when = tr("expires on {date}", date=expires) if expires else tr("expiry date not available")
+        protocol = data.get("protocol")
         if days is not None and days < 0:
-            self.line(f"TLS: {data.get('protocol')} · certificado CADUCADO hace {-days} días ({expires})", "1;31")
+            self.line(tr("TLS: {protocol} · certificate EXPIRED {days} days ago ({date})",
+                         protocol=protocol, days=-days, date=expires), "1;31")
         elif days is not None and days <= self.core.CERT_WARN_DAYS:
-            self.line(f"TLS: {data.get('protocol')} · certificado verificado · {when}", "33")
-            self.line(f"Aviso: el certificado caduca en {days} días. Conviene renovarlo pronto.", "33")
+            self.line(tr("TLS: {protocol} · verified certificate · {when}", protocol=protocol, when=when), "33")
+            self.line(tr("Warning: the certificate expires in {days} days. Renew it soon.", days=days), "33")
         else:
-            self.line(f"TLS: {data.get('protocol')} · certificado verificado · {when} ({days} días)", "32")
+            self.line(tr("TLS: {protocol} · verified certificate · {when} ({days} days)",
+                         protocol=protocol, when=when, days=days), "32")
 
     def routeros_summary(self, data):
-        source = {"user_supplied": "indicada por ti", "public_banner": "banner público", "unknown": "no obtenida"}
-        self.line(f"RouterOS: {data.get('version') or 'desconocida'} · {source.get(data.get('version_source'), 'sin fuente')}", "1;37")
-        self.line("Catálogo revisado: " + str(data.get("catalog_reviewed", "sin fecha")), "90")
+        source = {"user_supplied": "given by you", "public_banner": "public banner", "unknown": "not obtained"}
+        origin = data.get("version_source")
+        self.line(tr("RouterOS: {version} · {source}", version=data.get("version") or tr("unknown"),
+                     source=tr(source[origin]) if origin in source else tr("no source")), "1;37")
+        self.line(tr("Catalog reviewed: {date}", date=data.get("catalog_reviewed", tr("no date"))), "90")
         groups = {state: [entry for entry in data.get("advisories", []) if entry.get("status") == state]
                   for state in ("potentially_affected", "not_in_affected_range", "unknown_version", "manual_review")}
-        self.line(f"Avisos que podrían afectar esta versión: {len(groups['potentially_affected'])}",
+        self.line(tr("Advisories that could affect this version: {count}",
+                     count=len(groups["potentially_affected"])),
                   "33" if groups['potentially_affected'] else "37")
-        self.line(f"Avisos que no incluyen esta versión: {len(groups['not_in_affected_range'])}")
-        self.line(f"Avisos sin evaluar: {len(groups['unknown_version']) + len(groups['manual_review'])}")
+        self.line(tr("Advisories that do not include this version: {count}",
+                     count=len(groups["not_in_affected_range"])))
+        self.line(tr("Advisories not evaluated: {count}",
+                     count=len(groups["unknown_version"]) + len(groups["manual_review"])))
         for entry in groups["potentially_affected"]:
-            self.line(f"[REVISAR] {entry['id']} · {entry.get('component', '')}", "33")
+            self.line(f"[{tr('REVIEW')}] {entry['id']} · {entry.get('component', '')}", "33")
         if data.get("version_conflict"):
-            self.line("Hay versiones contradictorias. Valida la versión en tu inventario.", "33")
+            self.line(tr("There are contradictory versions. Validate the version in your inventory."), "33")
         elif not data.get("version"):
-            self.line("La versión no se publica. Indícala desde tu inventario para evaluar los avisos.", "33")
+            self.line(tr("The version is not published. Give it from your inventory to evaluate the advisories."), "33")
         if groups["potentially_affected"]:
-            self.line("Siguiente paso: revisa los parches de tu rama y restringe los servicios de gestión.", "33")
-        self.line("La comparación de versión no confirma explotación ni certifica que el router sea seguro.", "90")
+            self.line(tr("Next step: review the patches of your branch and restrict the management services."), "33")
+        self.line(tr("The version comparison does not confirm exploitation or certify that the router is secure."), "90")
 
     @staticmethod
     def explain_error(error):
         text = str(error)
         lower = text.lower()
         if "certificate has expired" in lower:
-            return "El certificado está caducado. El sitio debe renovarlo."
+            return tr("The certificate has expired. The site must renew it.")
         if "unable to get local issuer certificate" in lower:
             # Common on Windows: the root is only downloaded when a browser first needs it.
-            return ("Este equipo no reconoce la autoridad que firmó el certificado (falta su raíz en el "
-                    "almacén del sistema). No significa por sí solo que el sitio esté mal configurado.")
+            return tr("This computer does not recognize the authority that signed the certificate (its root is "
+                      "missing from the system store). That alone does not mean the site is misconfigured.")
         if any(word in lower for word in ("certificate_verify_failed", "certificate verify failed", "certificate failed")):
-            return "No se pudo validar el certificado. Revisa su confianza, nombre y fecha."
+            return tr("The certificate could not be validated. Check its trust, name and date.")
         if any(word in lower for word in ("getaddrinfo", "name or service", "name resolution", "nodename nor servname")):
-            return "No se pudo resolver el nombre. Revisa el objetivo y la conexión DNS."
+            return tr("The name could not be resolved. Check the target and the DNS connection.")
         if "timed out" in lower or "timeout" in lower:
-            return "No respondió dentro del tiempo configurado. Puedes aumentar la espera."
+            return tr("No answer within the configured time. You can increase the wait.")
         if "connection refused" in lower or "actively refused" in lower:
-            return "El equipo rechazó la conexión al servicio."
+            return tr("The host refused the connection to the service.")
         return text
 
     def details(self, report):
-        self.screen("Resultados explicados", str(report.get("meta", {}).get("target", "sin objetivo")))
+        self.screen(tr("Explained results"), str(report.get("meta", {}).get("target", tr("no target"))))
         score = report.get("score")
         if isinstance(score, dict) and score.get("findings"):
-            self.panel(f"HALLAZGOS · NOTA {score.get('grade')} ({score.get('score')}/100)",
+            self.panel(tr("FINDINGS · GRADE {grade} ({score}/100)", grade=score.get("grade"), score=score.get("score")),
                        [(score.get("note", ""), "90")])
             for finding in score["findings"]:
-                self.line(f"[{SEVERITY_LABELS[finding['severity']]}] {finding['area']}: {finding['title']}",
-                          SEVERITY_COLORS[finding["severity"]])
-                self.line("    Cómo arreglarlo: " + finding["fix"], "90")
+                self.line(f"[{severity_label(finding['severity'])}] {tr(finding['area'])}: {finding['title']}",
+                          severity_color(finding["severity"]))
+                self.line("    " + tr("How to fix: {fix}", fix=finding["fix"]), "90")
             self.line()
         for name, module in report.get("modules", {}).items():
-            self.panel(MODULE_LABELS.get(name, name).upper(),
-                       [(MODULE_HELP.get(name, "Datos de la comprobación."), "90")])
+            self.panel(module_label(name).upper(),
+                       [(tr(MODULE_HELP[name]) if name in MODULE_HELP else tr("Check data."), "90")])
             if module.get("status") == "skipped":
-                self.line("Estado: omitido en las opciones del análisis.")
+                self.line(tr("Status: skipped in the analysis options."))
                 continue
             if module.get("status") == "error":
-                self.line("Estado: no se pudo completar.", "33")
-                self.line(self.explain_error(module.get("error", "sin detalle")))
-                self.line("Detalle del error: " + str(module.get("error", "sin detalle")), "90")
+                self.line(tr("Status: could not be completed."), "33")
+                self.line(self.explain_error(module.get("error", tr("no details"))))
+                self.line(tr("Error details: {error}", error=module.get("error", tr("no details"))), "90")
                 continue
             data = module.get("data", {})
             self.summary({"modules": {name: module}})
             if name == "mikrotik":
                 for entry in data.get("advisories", []):
                     self.line()
-                    self.line(str(entry.get("id", "Aviso")) + " / " + str(entry.get("component", "")), "1;37")
-                    self.line("Estado: " + ADVISORY_LABELS.get(entry.get("status"), "sin datos"))
-                    self.line("Qué revisa: " + str(entry.get("summary", "consulta la fuente")))
+                    self.line(str(entry.get("id", tr("Advisory"))) + " / " + str(entry.get("component", "")), "1;37")
+                    status = entry.get("status")
+                    self.line(tr("Status: {status}", status=tr(ADVISORY_LABELS[status]) if status in ADVISORY_LABELS
+                                 else tr("no data")))
+                    self.line(tr("What it checks: {summary}", summary=entry.get("summary", tr("see the source"))))
                     if entry.get("status") == "potentially_affected" and data.get("version"):
                         import routeros
                         installed = routeros.parse_version(data["version"]).numbers
@@ -1003,24 +1111,28 @@ class InteractiveApp:
                                  if routeros.parse_version(row["introduced"]).numbers <= installed
                                  < routeros.parse_version(row["fixed"]).numbers]
                         if fixes:
-                            self.line("Versión que corrige este aviso en esa rama: " + ", ".join(fixes), "33")
+                            self.line(tr("Version that fixes this advisory in that branch: {versions}",
+                                         versions=", ".join(fixes)), "33")
                     ports = entry.get("observed_default_ports", [])
-                    self.line("Puertos asociados que respondieron: " + (", ".join(map(str, ports)) if ports else "no se estableció exposición"))
+                    self.line(tr("Related ports that answered: {ports}",
+                                 ports=", ".join(map(str, ports)) if ports else tr("no exposure was established")))
                     for source in entry.get("sources", []):
-                        self.line("Fuente: " + str(source), "90")
+                        self.line(tr("Source: {source}", source=source), "90")
             elif name == "ports":
                 for row in data.get("results", []):
                     opened = row.get("state") == "open"
-                    self.line(f"{'[RESPONDE]' if opened else '[NO ACCESIBLE]'} {row.get('port')}/TCP",
-                              "32" if opened else "90")
-                self.line("No accesible: la conexión falló; puede estar cerrado, filtrado o no responder.")
+                    tag = tr("[ANSWERS]") if opened else tr("[NOT REACHABLE]")
+                    self.line(f"{tag} {row.get('port')}/TCP", "32" if opened else "90")
+                self.line(tr("Not reachable: the connection failed; it may be closed, filtered or not answering."))
             elif name == "http":
-                explanations = {"content-security-policy": "limita los recursos que la página puede cargar",
-                                "strict-transport-security": "indica al navegador que use HTTPS",
-                                "x-content-type-options": "evita adivinar el tipo de contenido",
-                                "referrer-policy": "controla qué URL se comparte como referencia"}
+                explanations = {"content-security-policy": "limits the resources the page can load",
+                                "strict-transport-security": "tells the browser to use HTTPS",
+                                "x-content-type-options": "prevents guessing the content type",
+                                "referrer-policy": "controls which URL is shared as the referrer"}
                 for header in data.get("missing_headers", []):
-                    self.line(f"Ausente: {header} — {explanations.get(header, 'revisa la política del sitio')}")
+                    self.line(tr("Missing: {header} — {why}", header=header,
+                                 why=tr(explanations[header]) if header in explanations
+                                 else tr("review the site's policy")))
             elif name == "traceroute" and data.get("output"):
                 self.line(data["output"])
             elif name == "mail":
@@ -1030,56 +1142,59 @@ class InteractiveApp:
                     self.line("SPF: " + data["spf"]["record"], "90")
                 if data.get("dmarc", {}).get("record"):
                     self.line("DMARC: " + data["dmarc"]["record"], "90")
-                self.line(f"TLS-RPT: {'sí' if data.get('tls_rpt') else 'no'} · BIMI: {'sí' if data.get('bimi') else 'no'}")
+                self.line(tr("TLS-RPT: {tls_rpt} · BIMI: {bimi}",
+                             tls_rpt=tr("yes") if data.get("tls_rpt") else tr("no"),
+                             bimi=tr("yes") if data.get("bimi") else tr("no")))
             elif name == "tech":
                 for check in data.get("headers_grade", {}).get("checks", []):
-                    mark = {"ok": "[OK]", "aviso": "[AVISO]", "falta": "[FALTA]"}[check["state"]]
-                    self.line(f"{mark} {check['text']}", {"ok": "32", "aviso": "33", "falta": "33"}[check["state"]])
+                    mark, color = CHECK_MARKS.get(check["state"], ("[" + str(check["state"]).upper() + "]", "33"))
+                    self.line(f"{tr(mark)} {check['text']}", color)
                 for cookie in data.get("cookies", []):
                     if cookie.get("issues"):
                         self.line(f"Cookie {cookie['name']}: " + ", ".join(cookie["issues"]), "90")
                 for hop in data.get("redirects", []):
-                    self.line(f"Redirección {hop['status']} → {hop['location']}", "90")
+                    self.line(tr("Redirect {status} → {location}", status=hop["status"],
+                                 location=hop["location"]), "90")
                 if data.get("robots"):
-                    self.line(f"robots.txt: {data['robots']['disallow']} rutas bloqueadas · "
-                              + (", ".join(data["robots"]["sitemaps"]) or "sin sitemap"), "90")
+                    self.line(tr("robots.txt: {count} blocked paths · {sitemaps}", count=data["robots"]["disallow"],
+                                 sitemaps=", ".join(data["robots"]["sitemaps"]) or tr("no sitemap")), "90")
             elif name == "subdomains":
                 for row in data.get("alive", [])[:60]:
                     target = row.get("cname") or ", ".join(row.get("addresses", [])[:2])
                     self.line(f"{row['name']} → {target}", "90")
                 if len(data.get("alive", [])) > 60:
-                    self.line(f"… y {len(data['alive']) - 60} más en el reporte.", "90")
+                    self.line(tr("… and {count} more in the report.", count=len(data["alive"]) - 60), "90")
                 if data.get("note"):
                     self.line(data["note"], "90")
             elif name == "lookalike":
                 for row in data.get("registered", []):
                     self.line(f"{row['domain']} · {row.get('kind')} · {', '.join(row.get('addresses', []))}"
-                              + (" · recibe correo" if row.get("mx") else ""), "33" if row.get("mx") else "90")
+                              + (" · " + tr("receives mail") if row.get("mx") else ""), "33" if row.get("mx") else "90")
                 self.line(data.get("note", ""), "90")
             elif name == "rdap":
-                for key, label in (("handle", "Identificador"), ("name", "Nombre"),
-                                   ("country", "País del registro"), ("startAddress", "IP inicial"),
-                                   ("endAddress", "IP final")):
+                for key, label in (("handle", "Identifier"), ("name", "Name"),
+                                   ("country", "Registration country"), ("startAddress", "First IP"),
+                                   ("endAddress", "Last IP")):
                     if data.get(key):
-                        self.line(f"{label}: {data[key]}")
+                        self.line(f"{tr(label)}: {data[key]}")
             self.line()
 
     def viewer(self, entry):
         while True:
             report = entry["report"]
-            self.screen("Resumen del análisis", str(report.get("meta", {}).get("target", "sin objetivo")))
+            self.screen(tr("Analysis summary"), str(report.get("meta", {}).get("target", tr("no target"))))
             try:
                 self.summary(report)
             except (TypeError, KeyError, AttributeError):
-                self.line("Este reporte no tiene un resumen compatible. Puedes consultar el detalle.", "33")
+                self.line(tr("This report has no compatible summary. You can look at the details."), "33")
             self.line()
-            self.item("1", "Ver resultados explicados")
+            self.item("1", tr("View explained results"))
             html_paths = [path for path in entry["paths"] if Path(path).suffix.lower() == ".html"]
             if html_paths:
-                self.item("2", "Abrir reporte HTML en el navegador")
-            self.item("3", "Ver rutas de los archivos")
-            self.item("4", "Ver datos JSON (detalle técnico)")
-            self.item("0", "Volver")
+                self.item("2", tr("Open the HTML report in the browser"))
+            self.item("3", tr("View file paths"))
+            self.item("4", tr("View JSON data (technical details)"))
+            self.item("0", tr("Back"))
             try:
                 choice = self.choose({"1", "3", "4"} | ({"2"} if html_paths else set()))
             except Back:
@@ -1088,19 +1203,20 @@ class InteractiveApp:
                 try:
                     self.details(report)
                 except (TypeError, KeyError, AttributeError, ValueError):
-                    self.line("No se pudo interpretar parte de este reporte. Consulta sus datos JSON.", "33")
+                    self.line(tr("Part of this report could not be interpreted. Check its JSON data."), "33")
             elif choice == "2":
                 try:
                     opened = webbrowser.open(Path(html_paths[0]).resolve().as_uri())
-                    self.line("Reporte enviado al navegador." if opened else "No hay navegador disponible. Abre el archivo desde su ruta.")
+                    self.line(tr("Report sent to the browser.") if opened
+                              else tr("No browser available. Open the file from its path."))
                 except (OSError, webbrowser.Error) as exc:
-                    self.line(f"No se pudo abrir el navegador: {exc}", "33")
+                    self.line(tr("Could not open the browser: {path}", path=exc), "33")
             elif choice == "4":
-                self.screen("Datos JSON", "Información técnica completa del análisis.")
+                self.screen(tr("JSON data"), tr("Complete technical information of the analysis."))
                 self.line(json.dumps(report, ensure_ascii=False, indent=2))
             else:
                 if not entry["paths"]:
-                    self.line("No se guardaron archivos; el resultado sigue disponible durante esta sesión.")
+                    self.line(tr("No files were saved; the result stays available during this session."))
                 for path in entry["paths"]:
                     self.line(str(Path(path).resolve()))
             self.pause()
@@ -1135,38 +1251,38 @@ class InteractiveApp:
     def reports(self):
         while True:
             entries = self.stored_reports()
-            self.screen("Mis reportes", "Hasta 20 resultados recientes; 0 para volver.")
+            self.screen(tr("My reports"), tr("Up to 20 recent results; 0 to go back."))
             if not entries:
-                self.line("Aún no hay reportes. Ejecuta una auditoría para ver sus resultados aquí.")
-                self.line("Carpeta actual: " + str(self.defaults.output), "90")
+                self.line(tr("No reports yet. Run an audit to see its results here."))
+                self.line(tr("Current folder: {folder}", folder=self.defaults.output), "90")
                 self.pause()
                 return
             for index, entry in enumerate(entries, 1):
                 meta = entry["report"].get("meta", {})
-                self.item(str(index), str(meta.get("target", "sin objetivo")),
+                self.item(str(index), str(meta.get("target", tr("no target"))),
                           f"{meta.get('date', '')} · {meta.get('mode', '')}")
             key = self.choose({str(index) for index in range(1, len(entries) + 1)})
             self.viewer(entries[int(key) - 1])
 
     def diagnostics(self):
-        self.screen("Diagnóstico de este equipo", "Esta comprobación no realiza conexiones de red.")
+        self.screen(tr("Diagnostics of this computer"), tr("This check makes no network connections."))
         data = self.core.doctor()
         self.line("Python: " + data["python"])
-        self.line("Sistema: " + data["platform"])
+        self.line(tr("System: {platform}", platform=data["platform"]))
         self.line("TLS: " + data["openssl"])
-        self.line("Núcleo portable listo: no necesita root ni instalar paquetes pip.", "32")
+        self.line(tr("Portable core ready: it needs no root and no pip packages."), "32")
         self.line()
-        self.line("Herramientas opcionales:")
+        self.line(tr("Optional tools:"))
         for name, path in data["optional"].items():
-            self.line(f"{'[OK]' if path else '[--]'} {name}: {path or 'no instalada (opcional)'}")
+            self.line(f"{'[OK]' if path else '[--]'} {name}: {path or tr('not installed (optional)')}")
         self.pause()
 
     def classic(self):
-        self.screen("Auditorías clásicas", "Módulos Bash de ISP, aplicaciones web y red local.")
+        self.screen(tr("Classic audits"), tr("Bash modules for ISP, web applications and local network."))
         if os.name == "nt":
-            self.line("Estos módulos necesitan un entorno Linux/WSL y sus herramientas.")
-            self.line("Desde ese entorno ejecuta: bash domaininfo.sh --legacy")
-            self.line("La auditoría MikroTik portable sigue disponible en la opción 5.")
+            self.line(tr("These modules need a Linux/WSL environment and its tools."))
+            self.line(tr("From that environment run: bash domaininfo.sh --legacy"))
+            self.line(tr("The portable MikroTik audit is still available in option 5."))
             self.pause()
             return
         candidates = [shutil.which("bash"), "/opt/homebrew/bin/bash", "/usr/local/bin/bash"]
@@ -1182,44 +1298,44 @@ class InteractiveApp:
                 continue
         missing = [name for name in ("curl", "dig") if not shutil.which(name)]
         if not selected or missing:
-            self.line("Falta Bash 4+ o herramientas clásicas: " + (", ".join(missing) or "Bash 4+"), "33")
-            self.line("Instálalas desde la carpeta del proyecto: bash install.sh --legacy")
+            self.line(tr("Bash 4+ or classic tools are missing: {missing}", missing=", ".join(missing) or "Bash 4+"), "33")
+            self.line(tr("Install them from the project folder: bash install.sh --legacy"))
             self.pause()
             return
-        self.line("Abrirás el menú clásico. Al salir volverás a este menú.")
-        self.item("1", "Abrir menú clásico")
-        self.item("0", "Volver")
+        self.line(tr("You will open the classic menu. When you leave it you will come back to this menu."))
+        self.item("1", tr("Open classic menu"))
+        self.item("0", tr("Back"))
         self.choose({"1"})
         script = Path(__file__).resolve().with_name("domaininfo.sh")
         if not script.exists():  # installed with pipx/pip: only the Python core is packaged
-            self.line("Los módulos Bash no vienen en la instalación con pipx.", "33")
-            self.line("Clona el repositorio para usarlos: git clone https://github.com/kevxngg/domaininfo")
+            self.line(tr("The Bash modules are not included in the pipx installation."), "33")
+            self.line(tr("Clone the repository to use them: git clone https://github.com/kevxngg/domaininfo"))
             self.pause()
             return
         try:
             subprocess.run([selected, str(script), "--legacy"], check=False)
         except OSError as exc:
-            self.line(f"No se pudo abrir el menú clásico: {exc}", "33")
+            self.line(tr("Could not open the classic menu: {error}", error=exc), "33")
             self.pause()
 
     def help(self):
-        self.screen("Guía rápida")
-        self.line("1. Elige qué revisar. Para un router MikroTik usa la opción 5.")
-        self.line("2. Indica el dominio/IP o revisa una versión RouterOS sin conexión.")
-        self.line("3. Revisa el resumen. Puedes cambiar opciones antes de iniciar.")
-        self.line("4. Consulta el resultado y sus reportes desde Mis reportes.")
+        self.screen(tr("Quick guide"))
+        self.line(tr("1. Choose what to review. For a MikroTik router use option 5."))
+        self.line(tr("2. Give the domain/IP or check a RouterOS version offline."))
+        self.line(tr("3. Check the summary. You can change options before starting."))
+        self.line(tr("4. See the result and its reports from My reports."))
         self.line()
-        self.line("0 vuelve al menú anterior; CTRL+C cancela la acción en curso.")
-        self.line("Las preferencias duran esta sesión; no necesitas escribir comandos.")
-        self.line("En una URL se respeta protocolo y puerto; se revisa la raíz del sitio.")
-        self.line("Usa los modos de red sobre equipos que tengas autorización para revisar.")
+        self.line(tr("0 goes back to the previous menu; CTRL+C cancels the current action."))
+        self.line(tr("Preferences last for this session; you do not need to type commands."))
+        self.line(tr("For a URL, scheme and port are kept; the site root is reviewed."))
+        self.line(tr("Use the network modes on hosts you are authorized to review."))
         self.pause()
 
 
 class CliView:
-    """Readable output for `domaininfo <objetivo>` at a terminal; pipes keep the JSON."""
+    """Readable output for `domaininfo <target>` at a terminal; pipes keep the JSON."""
 
-    STATUS = {"running": "en curso", "ok": "listo", "error": "error", "skipped": "omitido"}
+    STATUS = {"running": "running", "ok": "done", "error": "error", "skipped": "skipped"}
 
     def __init__(self, core, args, output=None, errors=None):
         self.app = InteractiveApp(core, args, output=output or sys.stdout)
@@ -1235,21 +1351,21 @@ class CliView:
 
     def progress(self, name, status, position, total):
         if status == "running":
-            self._status_line(f"[{position}/{total}] {MODULE_LABELS.get(name, name)} · {self.STATUS[status]}…")
+            self._status_line(f"[{position}/{total}] {module_label(name)} · {tr(self.STATUS[status])}…")
         else:
             self._status_line("")
 
     def report(self, report, paths):
         app, meta = self.app, report.get("meta", {})
         app.line()
-        app.line(f"{meta.get('target', '')} · {MODE_LABELS.get(meta.get('mode'), (meta.get('mode'),))[0]}", "1;36")
+        app.line(f"{meta.get('target', '')} · {mode_label(meta.get('mode'))}", "1;36")
         app.summary(report)
         if paths:
             folder = str(Path(paths[0]).parent)
             kinds = ", ".join(Path(path).suffix.lstrip(".") for path in paths)
-            app.line(f"Reportes ({kinds}) en {folder}", "90")
+            app.line(tr("Reports ({kinds}) in {folder}", kinds=kinds, folder=folder), "90")
         if not self.hinted:
-            app.line("JSON: --json · Ayuda y ejemplos: --help", "90")
+            app.line(tr("JSON: --json · Help and examples: --help"), "90")
             self.hinted = True
 
     def note(self, text):
@@ -1261,6 +1377,6 @@ class CliView:
 
     def changes(self, stamp, target, changes):
         self._status_line("")
-        self.app.line(f"[{stamp}] {target}: {len(changes)} cambio(s)", "1;33")
+        self.app.line(tr("[{time}] {target}: {count} change(s)", time=stamp, target=target, count=len(changes)), "1;33")
         for change in changes:
             self.app.line("  • " + change, "33")

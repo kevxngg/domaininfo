@@ -1,0 +1,7 @@
+# The built UI (dist/) is committed on purpose: the Python package serves it without Node.
+# The repository root ignores dist/, *.html and *.json, so re-include them here.
+node_modules/
+!dist/
+!dist/**
+!*.html
+!*.json

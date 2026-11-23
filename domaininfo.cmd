@@ -7,7 +7,7 @@ exit /b %errorlevel%
 :try_py
 py -3 -c "import sys; sys.exit(sys.version_info < (3,10))" >nul 2>nul
 if errorlevel 1 (
-  echo Instala Python 3.10+ y activa su opcion de PATH. 1>&2
+  echo Install Python 3.10+ and enable its PATH option. 1>&2
   exit /b 1
 )
 py -3 "%~dp0domaininfo.py" %*

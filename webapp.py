@@ -1,14 +1,16 @@
-"""Seguridad de aplicaciones web (pasivo): analiza una URL completa sin enviar formularios
-ni credenciales.
+"""Web application security (passive): analyzes a full URL without submitting forms or
+credentials.
 
-Comprueba transporte y HSTS, Content-Security-Policy, clickjacking, Referrer-Policy,
-Permissions-Policy, nosniff, cookies (Secure, HttpOnly, SameSite), formularios (campos de usuario
-y contraseña, tokens CSRF visibles y protecciones alternativas), redirecciones, CORS, errores
-técnicos y datos sensibles en la respuesta. Compara la página con la raíz del sitio para
-demostrar que se ha auditado la ruta pedida.
+Checks transport and HSTS, Content-Security-Policy, clickjacking, Referrer-Policy,
+Permissions-Policy, nosniff, cookies (Secure, HttpOnly, SameSite), forms (user and password
+fields, visible CSRF tokens and alternative protections), redirects, CORS, technical errors
+and sensitive data in the response. Compares the page with the site root to prove that the
+requested path was the one audited.
 
-Todas las peticiones son GET, pasan por ``safety`` (alcance, IP fijada, límites) y cada
-hallazgo dice de dónde sale (``evidence.Finding``).
+Every request is a GET, goes through ``safety`` (scope, pinned IP, limits) and every finding
+says where it comes from (``evidence.Finding``). Categories, check ids, states, severities,
+statuses and confidence values are English in the JSON; titles and texts follow the active
+language.
 """
 
 import hashlib
@@ -20,45 +22,50 @@ import time
 from urllib import parse
 
 import evidence
+from i18n import tr
 import safety
 
 TOOL = "domaininfo.webapp"
 CORS_PROBE = "https://domaininfo-cors-probe.invalid"
 CSRF_NAME = re.compile(r"csrf|xsrf|authenticity_token|requestverificationtoken|^_token$|^token$|nonce|"
                        r"csrfmiddlewaretoken|anti.?forgery|form_key|__viewstategenerator", re.I)
+# Matches field names of remote pages, so the Spanish words stay ("correo", "usuario", "cuenta").
 USER_NAME = re.compile(r"user|login|e-?mail|correo|usuario|account|cuenta|identif|^uid$|^name$", re.I)
 SESSION_NAME = re.compile(r"sess|sid|auth|token|jwt|login|remember|identity", re.I)
 VERSION = re.compile(r"\d+\.\d+")
 
+# (title, pattern); titles are English and translated when the finding is added
 ERROR_SIGNATURES = (
-    ("Traza de error de Python", r"Traceback \(most recent call last\)"),
-    ("Página de depuración de Django", r"You're seeing this error because you have <code>DEBUG = True|DEBUG = True"),
-    ("Traza de excepción Java", r"\bat (?:java|javax|org\.springframework|org\.apache)\.[\w.$]+\(|Exception in thread \""),
-    ("Error de PHP con ruta del servidor", r"(?:Fatal error|Warning|Parse error|Notice)</b>?:? .{0,200}? on line <b>?\d+"),
-    ("Página de error de ASP.NET", r"Server Error in '/' Application|<b>Stack Trace:</b>"),
-    ("Mensaje de error de base de datos", r"SQLSTATE\[|ORA-\d{5}|You have an error in your SQL syntax|"
-                                          r"PG::\w+Error|Microsoft OLE DB Provider|SQLite3::|psycopg2\.\w+Error"),
-    ("Página de excepción de Laravel/Symfony", r"Whoops, looks like something went wrong|Symfony\\Component\\"),
-    ("Página de excepción de Rails", r"Action Controller: Exception caught"),
-    ("Traza de excepción de Node.js", r"\n[ \t]{1,16}at [\w.<>]{1,200} \((?:/|[A-Z]:\\)[^)\n]{1,500}\.js:\d+:\d+\)"),
+    ("Python error traceback", r"Traceback \(most recent call last\)"),
+    ("Django debug page", r"You're seeing this error because you have <code>DEBUG = True|DEBUG = True"),
+    ("Java exception trace", r"\bat (?:java|javax|org\.springframework|org\.apache)\.[\w.$]+\(|Exception in thread \""),
+    ("PHP error with a server path", r"(?:Fatal error|Warning|Parse error|Notice)</b>?:? .{0,200}? on line <b>?\d+"),
+    ("ASP.NET error page", r"Server Error in '/' Application|<b>Stack Trace:</b>"),
+    ("Database error message", r"SQLSTATE\[|ORA-\d{5}|You have an error in your SQL syntax|"
+                               r"PG::\w+Error|Microsoft OLE DB Provider|SQLite3::|psycopg2\.\w+Error"),
+    ("Laravel/Symfony exception page", r"Whoops, looks like something went wrong|Symfony\\Component\\"),
+    ("Rails exception page", r"Action Controller: Exception caught"),
+    ("Node.js exception trace", r"\n[ \t]{1,16}at [\w.<>]{1,200} \((?:/|[A-Z]:\\)[^)\n]{1,500}\.js:\d+:\d+\)"),
 )
+# (title, pattern, severity, status, reference)
 SECRET_SIGNATURES = (
-    ("Clave privada en la respuesta", r"-----BEGIN [A-Z ]*PRIVATE KEY-----", "alta", "confirmado", "CWE-321"),
-    ("Clave de acceso de AWS en la respuesta", r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b", "alta", "probable", "CWE-798"),
-    ("Token de GitHub en la respuesta", r"\bgh[pousr]_[A-Za-z0-9]{36,}\b", "alta", "probable", "CWE-798"),
-    ("Token de Slack en la respuesta", r"\bxox[abprs]-[\w-]{10,}", "alta", "probable", "CWE-798"),
-    ("Clave de API de Google en la respuesta", r"\bAIza[\w-]{35}\b", "baja", "informativo", "CWE-798"),
-    ("JWT incrustado en la página", r"\beyJ[\w-]{5,}\.eyJ[\w-]{5,}\.[\w-]{5,}", "media", "pendiente", "CWE-200"),
-    ("Dirección IP interna en la respuesta",
-     r"\b(?:10\.\d{1,3}|192\.168|172\.(?:1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}\b", "baja", "informativo", "CWE-200"),
+    ("Private key in the response", r"-----BEGIN [A-Z ]*PRIVATE KEY-----", "high", "confirmed", "CWE-321"),
+    ("AWS access key in the response", r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b", "high", "likely", "CWE-798"),
+    ("GitHub token in the response", r"\bgh[pousr]_[A-Za-z0-9]{36,}\b", "high", "likely", "CWE-798"),
+    ("Slack token in the response", r"\bxox[abprs]-[\w-]{10,}", "high", "likely", "CWE-798"),
+    ("Google API key in the response", r"\bAIza[\w-]{35}\b", "low", "informational", "CWE-798"),
+    ("JWT embedded in the page", r"\beyJ[\w-]{5,}\.eyJ[\w-]{5,}\.[\w-]{5,}", "medium", "pending", "CWE-200"),
+    ("Internal IP address in the response",
+     r"\b(?:10\.\d{1,3}|192\.168|172\.(?:1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}\b", "low", "informational", "CWE-200"),
 )
 OWASP_HEADERS = "OWASP Secure Headers Project"
-SCAN_LIMIT = 256 * 1024  # las firmas de errores y secretos solo recorren este prefijo de la respuesta
+SCAN_LIMIT = 256 * 1024  # error and secret signatures only scan this prefix of the response
 URL_KEYS = {"url", "final_url", "from", "location", "action", "target"}
+SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2, "info": 3}
 
 
 def _scrub(value, key=None):
-    """Quita caracteres de control de todo lo que viene del objetivo y oculta secretos en las URL."""
+    """Strip control characters from everything that comes from the target and hide secrets in URLs."""
     if isinstance(value, dict):
         return {k: _scrub(v, k) for k, v in value.items()}
     if isinstance(value, list):
@@ -69,7 +76,7 @@ def _scrub(value, key=None):
 
 
 class _PageParser(HTMLParser):
-    """Título, formularios con sus campos y metaetiquetas de token CSRF."""
+    """Title, forms with their fields, and CSRF token meta tags."""
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -110,14 +117,14 @@ def parse_page(text):
     try:
         parser.feed(text)
         parser.close()
-    except (AssertionError, ValueError):  # HTML roto: nos quedamos con lo leído
+    except (AssertionError, ValueError):  # broken HTML: keep what was read
         pass
     parser.title = html.unescape(re.sub(r"\s+", " ", parser.title)).strip()
     return parser
 
 
 def parse_cookie(raw):
-    """Atributos de un Set-Cookie sin guardar su valor."""
+    """Attributes of a Set-Cookie header without keeping its value."""
     parts = [p.strip() for p in raw.split(";")]
     name = parts[0].split("=", 1)[0].strip()
     attrs = {}
@@ -142,27 +149,27 @@ def parse_csp(value):
 
 
 def csp_issues(directives):
-    """Debilidades concretas de una CSP (sin inventar las que no se pueden ver)."""
+    """Concrete weaknesses of a CSP (without inventing the ones that cannot be seen)."""
     issues = []
     script = directives.get("script-src", directives.get("default-src"))
     name = "script-src" if "script-src" in directives else "default-src"
     if script is None:
-        issues.append("sin script-src ni default-src: no limita los scripts")
+        issues.append(tr("no script-src or default-src: scripts are not restricted"))
     else:
         strict = any(t.startswith(("'nonce-", "'sha256-", "'sha384-", "'sha512-")) or t == "'strict-dynamic'"
                      for t in script)
         if "'unsafe-inline'" in script and not strict:
-            issues.append(f"'unsafe-inline' en {name}")
+            issues.append(tr("'unsafe-inline' in {directive}", directive=name))
         if "'unsafe-eval'" in script:
-            issues.append(f"'unsafe-eval' en {name}")
+            issues.append(tr("'unsafe-eval' in {directive}", directive=name))
         if "*" in script or "https:" in script or "http:" in script:
-            issues.append(f"origen comodín en {name}")
+            issues.append(tr("wildcard source in {directive}", directive=name))
         if "data:" in script:
-            issues.append(f"data: en {name}")
+            issues.append(tr("data: in {directive}", directive=name))
     if "object-src" not in directives and directives.get("default-src") != ["'none'"]:
-        issues.append("falta object-src 'none'")
+        issues.append(tr("missing object-src 'none'"))
     if "base-uri" not in directives:
-        issues.append("falta base-uri")
+        issues.append(tr("missing base-uri"))
     return issues
 
 
@@ -181,31 +188,31 @@ class _Audit:
         self.policy = safety.ScopePolicy(self.url, extra_hosts=list(getattr(args, "scope", None) or []),
                                          allow_private=bool(getattr(args, "allow_private", False)))
         self.findings, self.checks = [], {}
-        # Plazo total para las tres peticiones (página, CORS y raíz) con sus redirecciones
+        # Total deadline for the three requests (page, CORS and root) including their redirects
         self.deadline = time.monotonic() + min(180.0, max(30.0, self.timeout * 12))
 
-    # -- utilidades ---------------------------------------------------------------------------
+    # -- helpers ------------------------------------------------------------------------------
     def get(self, url, headers=None):
         try:
             return safety.http_get(url, self.policy, self.timeout, headers=headers, insecure_tls=self.insecure,
                                    deadline=self.deadline)
         except http.client.HTTPException as exc:
-            raise OSError(f"Respuesta HTTP no válida: {exc}") from exc
+            raise OSError(tr("Invalid HTTP response: {error}", error=exc)) from exc
 
-    def check(self, cid, state, evidence_kind="directa", detail=None):
+    def check(self, cid, state, evidence_kind="direct", detail=None):
         entry = {"id": cid, "state": state, "evidence": evidence_kind}
         if detail:
             entry["detail"] = detail
         self.checks[cid] = entry
 
     def add(self, category, title, severity, status, proof, recommendation, impact="", verification="",
-            references=(), confidence="alta"):
+            references=(), confidence="high"):
         self.findings.append(evidence.Finding(
             target=evidence.redact_url(self.url), path=parse.urlsplit(self.final).path or "/", category=category, title=title,
             severity=severity, status=status, confidence=confidence, evidence=proof, tool=TOOL, impact=impact,
             verification=verification, recommendation=recommendation, references=list(references)).to_dict())
 
-    # -- auditoría ----------------------------------------------------------------------------
+    # -- audit --------------------------------------------------------------------------------
     def run(self):
         response = self.get(self.url)
         self.final = response.url
@@ -225,44 +232,43 @@ class _Audit:
         self.errors(text[:SCAN_LIMIT], response.status)
         self.exposure(text[:SCAN_LIMIT])
         result["root_comparison"] = self.root(response, page)
-        order = {"alta": 0, "media": 1, "baja": 2, "info": 3}
-        self.findings.sort(key=lambda f: (order[f["severity"]], f["category"]))
+        self.findings.sort(key=lambda f: (SEVERITY_ORDER[f["severity"]], f["category"]))
         checks = list(self.checks.values())
         result.update({"findings": self.findings, "checks": checks,
                        "assessment": evidence.scores(self.findings, checks),
-                       "note": "Análisis pasivo: solo peticiones GET; no se envían formularios ni credenciales"})
+                       "note": tr("Passive analysis: GET requests only; no forms or credentials are sent")})
         return _scrub(result)
 
     def transport(self):
         if self.https:
             self.check("https", "ok")
             if self.insecure:
-                self.add("transporte", "Certificado TLS no verificado (auditado con --insecure-tls)", "media",
-                         "informativo", "La conexión se aceptó sin validar el certificado",
-                         "Instala un certificado válido; revisa el módulo TLS", confidence="media")
+                self.add("transport", tr("TLS certificate not verified (audited with --insecure-tls)"), "medium",
+                         "informational", tr("The connection was accepted without validating the certificate"),
+                         tr("Install a valid certificate; check the TLS module"), confidence="medium")
         else:
-            self.check("https", "hallazgo")
-            self.add("transporte", "La página se sirve por HTTP sin cifrar", "media", "confirmado",
-                     f"URL final: {self.final}", "Sirve el sitio solo por HTTPS y redirige HTTP a HTTPS",
-                     impact="Cualquiera en la red puede leer o alterar la página y los datos enviados",
-                     verification="Abre la URL con http:// y comprueba que no redirige a https://",
+            self.check("https", "finding")
+            self.add("transport", tr("The page is served over unencrypted HTTP"), "medium", "confirmed",
+                     tr("Final URL: {url}", url=self.final), tr("Serve the site over HTTPS only and redirect HTTP to HTTPS"),
+                     impact=tr("Anyone on the network can read or alter the page and the data sent"),
+                     verification=tr("Open the URL with http:// and check that it does not redirect to https://"),
                      references=["CWE-319", "OWASP ASVS V9.1"])
 
     def redirects(self, chain):
         state = "ok"
         for hop in chain:
             if hop.get("downgrade"):
-                state = "hallazgo"
-                self.add("redirecciones", "Redirección de HTTPS a HTTP", "media", "confirmado",
+                state = "finding"
+                self.add("redirects", tr("Redirect from HTTPS to HTTP"), "medium", "confirmed",
                          f"{hop['status']} {hop['from']} → {hop['location']}",
-                         "Haz que todas las redirecciones apunten a HTTPS", references=["CWE-319"])
+                         tr("Make every redirect point to HTTPS"), references=["CWE-319"])
             if hop.get("blocked"):
-                state = "hallazgo"
-                self.add("redirecciones", "Redirección no seguida: fuera del alcance autorizado", "info", "informativo",
+                state = "finding"
+                self.add("redirects", tr("Redirect not followed: outside the authorized scope"), "info", "informational",
                          f"{hop['status']} → {hop.get('location')} ({hop['blocked']})",
-                         "Si el destino también está autorizado, añádelo con --scope",
-                         verification="Revisa a dónde redirige la página y si ese destino es tuyo")
-        self.check("redirecciones", state)
+                         tr("If the destination is also authorized, add it with --scope"),
+                         verification=tr("Check where the page redirects and whether that destination is yours"))
+        self.check("redirects", state)
 
     def security_headers(self):
         h = self.headers
@@ -274,17 +280,17 @@ class _Audit:
                        "include_subdomains": "includesubdomains" in (hsts or "").lower(),
                        "preload": "preload" in (hsts or "").lower()}
         if not self.https:
-            self.check("hsts", "no_aplicable")
+            self.check("hsts", "not_applicable")
         elif not hsts:
-            self.check("hsts", "hallazgo")
-            self.add("hsts", "Sin HSTS (Strict-Transport-Security)", "media", "confirmado", "Cabecera ausente",
-                     "Añade Strict-Transport-Security: max-age=31536000; includeSubDomains",
-                     impact="Un atacante en la red puede forzar la primera visita por HTTP",
+            self.check("hsts", "finding")
+            self.add("hsts", tr("No HSTS (Strict-Transport-Security)"), "medium", "confirmed", tr("Header missing"),
+                     tr("Add Strict-Transport-Security: max-age=31536000; includeSubDomains"),
+                     impact=tr("An attacker on the network can force the first visit over HTTP"),
                      references=["CWE-319", OWASP_HEADERS])
         elif not age or int(age.group(1)) < 15552000:
-            self.check("hsts", "hallazgo")
-            self.add("hsts", "HSTS con duración menor de 6 meses", "baja", "confirmado",
-                     "Strict-Transport-Security: " + hsts, "Usa max-age de al menos 15552000 (6 meses)",
+            self.check("hsts", "finding")
+            self.add("hsts", tr("HSTS lasts less than 6 months"), "low", "confirmed",
+                     "Strict-Transport-Security: " + hsts, tr("Use a max-age of at least 15552000 (6 months)"),
                      references=[OWASP_HEADERS])
         else:
             self.check("hsts", "ok")
@@ -296,16 +302,18 @@ class _Audit:
         out["csp"] = {"present": bool(csp_value), "report_only": bool(report_only) and not csp_value,
                       "directives": sorted(directives), "issues": issues}
         if not csp_value:
-            self.check("csp", "hallazgo")
-            self.add("csp", "Sin Content-Security-Policy" + (" (solo en modo informe)" if report_only else ""),
-                     "media", "confirmado", "Cabecera ausente" if not report_only else "Solo Report-Only",
-                     "Define una CSP con script-src limitado (nonces o hashes), object-src 'none' y base-uri 'self'",
-                     impact="Un fallo de XSS tendría menos barreras", references=["CWE-1021", "CWE-79", OWASP_HEADERS])
+            self.check("csp", "finding")
+            self.add("csp", tr("No Content-Security-Policy (report-only mode only)") if report_only
+                     else tr("No Content-Security-Policy"),
+                     "medium", "confirmed", tr("Report-Only only") if report_only else tr("Header missing"),
+                     tr("Define a CSP with a restricted script-src (nonces or hashes), object-src 'none' and "
+                        "base-uri 'self'"),
+                     impact=tr("An XSS flaw would face fewer barriers"), references=["CWE-1021", "CWE-79", OWASP_HEADERS])
         elif issues:
-            self.check("csp", "hallazgo")
-            self.add("csp", "CSP débil: " + "; ".join(issues), "baja", "confirmado",
+            self.check("csp", "finding")
+            self.add("csp", tr("Weak CSP: {issues}", issues="; ".join(issues)), "low", "confirmed",
                      "Content-Security-Policy: " + csp_value,
-                     "Elimina 'unsafe-inline'/'unsafe-eval' y comodines; añade object-src 'none' y base-uri",
+                     tr("Remove 'unsafe-inline'/'unsafe-eval' and wildcards; add object-src 'none' and base-uri"),
                      references=["CWE-79", OWASP_HEADERS])
         else:
             self.check("csp", "ok")
@@ -318,57 +326,57 @@ class _Audit:
         if protected:
             self.check("clickjacking", "ok")
         else:
-            self.check("clickjacking", "hallazgo")
-            self.add("clickjacking", "Sin protección contra clickjacking", "media", "confirmado",
-                     "Ni X-Frame-Options válida ni CSP frame-ancestors",
-                     "Añade CSP frame-ancestors 'self' (o X-Frame-Options: DENY)",
-                     impact="La página se puede incrustar en otra para engañar al usuario",
-                     verification="Carga la URL en un <iframe> desde otro origen", references=["CWE-1021"])
+            self.check("clickjacking", "finding")
+            self.add("clickjacking", tr("No clickjacking protection"), "medium", "confirmed",
+                     tr("Neither a valid X-Frame-Options nor CSP frame-ancestors"),
+                     tr("Add CSP frame-ancestors 'self' (or X-Frame-Options: DENY)"),
+                     impact=tr("The page can be embedded in another one to trick the user"),
+                     verification=tr("Load the URL in an <iframe> from another origin"), references=["CWE-1021"])
         # nosniff
         nosniff = (h.get("x-content-type-options") or "").lower() == "nosniff"
         out["x_content_type_options"] = nosniff
-        self.check("nosniff", "ok" if nosniff else "hallazgo")
+        self.check("nosniff", "ok" if nosniff else "finding")
         if not nosniff:
-            self.add("cabeceras", "Sin X-Content-Type-Options: nosniff", "baja", "confirmado", "Cabecera ausente",
-                     "Añade X-Content-Type-Options: nosniff", references=["CWE-693", OWASP_HEADERS])
+            self.add("headers", tr("No X-Content-Type-Options: nosniff"), "low", "confirmed", tr("Header missing"),
+                     tr("Add X-Content-Type-Options: nosniff"), references=["CWE-693", OWASP_HEADERS])
         # Referrer-Policy
         referrer = (h.get("referrer-policy") or "").lower()
         out["referrer_policy"] = referrer or None
-        # Con varias políticas, el navegador aplica la última que entiende
+        # With several policies, the browser applies the last one it understands
         effective = referrer.split(",")[-1].strip() if referrer else ""
         if effective in ("unsafe-url", "no-referrer-when-downgrade"):
-            self.check("referrer", "hallazgo")
-            self.add("cabeceras", "Referrer-Policy permisiva: " + referrer, "baja", "confirmado",
-                     "Referrer-Policy: " + referrer, "Usa strict-origin-when-cross-origin o no-referrer",
-                     impact="Las URL completas (con parámetros) se envían a otros sitios", references=["CWE-200"])
+            self.check("referrer", "finding")
+            self.add("headers", tr("Permissive Referrer-Policy: {policy}", policy=referrer), "low", "confirmed",
+                     "Referrer-Policy: " + referrer, tr("Use strict-origin-when-cross-origin or no-referrer"),
+                     impact=tr("Full URLs (with parameters) are sent to other sites"), references=["CWE-200"])
         elif not referrer:
-            self.check("referrer", "hallazgo")
-            self.add("cabeceras", "Sin Referrer-Policy (se aplica la del navegador)", "info", "informativo",
-                     "Cabecera ausente", "Define Referrer-Policy: strict-origin-when-cross-origin",
+            self.check("referrer", "finding")
+            self.add("headers", tr("No Referrer-Policy (the browser default applies)"), "info", "informational",
+                     tr("Header missing"), tr("Set Referrer-Policy: strict-origin-when-cross-origin"),
                      references=[OWASP_HEADERS])
         else:
             self.check("referrer", "ok")
         # Permissions-Policy
         permissions = h.get("permissions-policy")
         out["permissions_policy"] = permissions
-        self.check("permissions", "ok" if permissions else "hallazgo")
+        self.check("permissions", "ok" if permissions else "finding")
         if not permissions:
-            self.add("cabeceras", "Sin Permissions-Policy", "info", "informativo", "Cabecera ausente",
-                     "Desactiva lo que no uses: Permissions-Policy: camera=(), microphone=(), geolocation=()",
+            self.add("headers", tr("No Permissions-Policy"), "info", "informational", tr("Header missing"),
+                     tr("Disable what you do not use: Permissions-Policy: camera=(), microphone=(), geolocation=()"),
                      references=[OWASP_HEADERS])
-        # Versiones expuestas
+        # Exposed versions
         leaks = [f"{n}: {h[n]}" for n in ("server", "x-powered-by", "x-aspnet-version", "x-aspnetmvc-version",
                                           "x-generator") if n in h and VERSION.search(h[n])]
         out["version_leaks"] = leaks
         for leak in leaks:
-            self.add("exposicion", "La cabecera revela la versión del software", "baja", "confirmado", leak,
-                     "Oculta la versión en la configuración del servidor", references=["CWE-200"])
+            self.add("exposure", tr("The header reveals the software version"), "low", "confirmed", leak,
+                     tr("Hide the version in the server configuration"), references=["CWE-200"])
         return out
 
     def cookies(self, raw_cookies):
         rows = [parse_cookie(raw) for raw in raw_cookies]
         if not rows:
-            self.check("cookies", "no_aplicable", detail="La respuesta no crea cookies")
+            self.check("cookies", "not_applicable", detail=tr("The response sets no cookies"))
             return rows
         state = "ok"
         for row in rows:
@@ -377,34 +385,38 @@ class _Audit:
                 f"; {k}" for k, v in (("Secure", row["secure"]), ("HttpOnly", row["httponly"])) if v) \
                 + (f"; SameSite={row['samesite']}" if row["samesite"] else "")
             if self.https and not row["secure"]:
-                state = "hallazgo"
-                self.add("cookies", f"Cookie {name} sin Secure", "media" if row["session_like"] else "baja",
-                         "confirmado", proof, "Marca la cookie con Secure",
-                         impact="Puede viajar por HTTP sin cifrar", references=["CWE-614"])
+                state = "finding"
+                self.add("cookies", tr("Cookie {name} without Secure", name=name),
+                         "medium" if row["session_like"] else "low",
+                         "confirmed", proof, tr("Mark the cookie with Secure"),
+                         impact=tr("It can travel over unencrypted HTTP"), references=["CWE-614"])
             if not row["httponly"]:
-                state = "hallazgo"
-                self.add("cookies", f"Cookie {name} sin HttpOnly", "media" if row["session_like"] else "baja",
-                         "confirmado" if row["session_like"] else "informativo", proof,
-                         "Marca con HttpOnly las cookies que no necesite JavaScript",
-                         impact="Un XSS podría leerla", references=["CWE-1004"],
-                         confidence="alta" if row["session_like"] else "media")
+                state = "finding"
+                self.add("cookies", tr("Cookie {name} without HttpOnly", name=name),
+                         "medium" if row["session_like"] else "low",
+                         "confirmed" if row["session_like"] else "informational", proof,
+                         tr("Mark cookies that JavaScript does not need with HttpOnly"),
+                         impact=tr("An XSS could read it"), references=["CWE-1004"],
+                         confidence="high" if row["session_like"] else "medium")
             if not row["samesite"]:
-                state = "hallazgo"
-                self.add("cookies", f"Cookie {name} sin SameSite explícito", "baja", "informativo", proof,
-                         "Define SameSite=Lax o Strict (None solo con Secure si es imprescindible)",
-                         impact="Depende del valor por defecto de cada navegador", references=["CWE-1275"])
+                state = "finding"
+                self.add("cookies", tr("Cookie {name} without an explicit SameSite", name=name), "low",
+                         "informational", proof,
+                         tr("Set SameSite=Lax or Strict (None only with Secure, and only if essential)"),
+                         impact=tr("It depends on each browser's default"), references=["CWE-1275"])
             elif row["samesite"] == "None" and not row["secure"]:
-                state = "hallazgo"
-                self.add("cookies", f"Cookie {name} con SameSite=None sin Secure", "media", "confirmado", proof,
-                         "SameSite=None exige Secure; los navegadores la rechazarán o se enviará en peticiones "
-                         "de terceros", references=["CWE-1275"])
+                state = "finding"
+                self.add("cookies", tr("Cookie {name} with SameSite=None but no Secure", name=name), "medium",
+                         "confirmed", proof,
+                         tr("SameSite=None requires Secure; browsers will reject the cookie or send it on "
+                            "third-party requests"), references=["CWE-1275"])
         self.check("cookies", state)
         return rows
 
     def forms(self, page, cookies):
         rows = []
         samesite = [c["name"] for c in cookies if c["samesite"] in ("Lax", "Strict")]
-        csrf_state = "no_aplicable"
+        csrf_state = "not_applicable"
         for index, form in enumerate(page.forms, 1):
             action = parse.urljoin(self.final, html.unescape(form["action"])) if form["action"] else self.final
             fields = form["fields"]
@@ -413,62 +425,68 @@ class _Audit:
                      and USER_NAME.search(f["name"])]
             tokens = [f["name"] for f in fields if f["type"] == "hidden" and CSRF_NAME.search(f["name"])
                       and f["has_value"]]
-            label = f"Formulario {index}" + (f" ({form['id']})" if form["id"] else "")
+            label = tr("Form {index} ({id})", index=index, id=form["id"]) if form["id"] \
+                else tr("Form {index}", index=index)
             row = {"index": index, "id": form["id"] or None, "method": form["method"], "action": action,
                    "fields": [{"name": f["name"], "type": f["type"]} for f in fields],
                    "login": bool(passwords), "password_fields": passwords, "user_fields": users}
             if form["method"] in ("POST", "PUT", "PATCH", "DELETE"):
                 if tokens:
-                    csrf = {"state": "token_visible", "fields": tokens, "evidence": "directa"}
+                    csrf = {"state": "token_visible", "fields": tokens, "evidence": "direct"}
                     csrf_state = _worst(csrf_state, "ok")
                 elif page.meta_csrf:
-                    csrf = {"state": "token_en_meta", "fields": page.meta_csrf, "evidence": "heuristica"}
+                    csrf = {"state": "token_in_meta", "fields": page.meta_csrf, "evidence": "heuristic"}
                     csrf_state = _worst(csrf_state, "ok")
-                    self.add("csrf", f"{label}: token CSRF en <meta>, no en el formulario", "info", "informativo",
-                             f"<meta name='{page.meta_csrf[0]}'>",
-                             "Comprueba que el JavaScript lo envía en una cabecera en cada petición",
-                             verification="Revisa en las herramientas del navegador la cabecera de la petición",
-                             confidence="media")
+                    self.add("csrf", tr("{form}: CSRF token in <meta>, not in the form", form=label), "info",
+                             "informational", f"<meta name='{page.meta_csrf[0]}'>",
+                             tr("Check that the JavaScript sends it in a header on every request"),
+                             verification=tr("Check the request header in the browser developer tools"),
+                             confidence="medium")
                 elif samesite:
-                    csrf = {"state": "proteccion_alternativa", "fields": [], "cookies_samesite": samesite,
-                            "evidence": "heuristica"}
-                    csrf_state = _worst(csrf_state, "hallazgo")
-                    self.add("csrf", f"{label}: sin token CSRF visible; depende de cookies SameSite", "info",
-                             "informativo", "Cookies con SameSite: " + ", ".join(samesite),
-                             "Añade un token CSRF por sesión además de SameSite",
-                             verification="En un entorno autorizado, envía el formulario desde otro origen "
-                                          "y comprueba que el servidor lo rechaza", references=["CWE-352"],
-                             confidence="media")
+                    csrf = {"state": "alternative_protection", "fields": [], "cookies_samesite": samesite,
+                            "evidence": "heuristic"}
+                    csrf_state = _worst(csrf_state, "finding")
+                    self.add("csrf", tr("{form}: no visible CSRF token; relies on SameSite cookies", form=label), "info",
+                             "informational", tr("Cookies with SameSite: {names}", names=", ".join(samesite)),
+                             tr("Add a per-session CSRF token on top of SameSite"),
+                             verification=tr("In an authorized environment, submit the form from another origin "
+                                             "and check that the server rejects it"), references=["CWE-352"],
+                             confidence="medium")
                 else:
-                    csrf = {"state": "desconocido", "fields": [], "evidence": "heuristica"}
-                    csrf_state = _worst(csrf_state, "hallazgo")
-                    self.add("csrf", f"{label}: no se ve protección CSRF (pendiente de verificar)", "media",
-                             "pendiente", f"{form['method']} {action} sin campo oculto de token ni cookies SameSite",
-                             "Usa un token CSRF por sesión o comprueba Origin/Referer en el servidor",
-                             impact="Si no hay otra defensa, otro sitio podría enviar el formulario en nombre del usuario",
-                             verification="La protección puede estar en cabeceras o en el servidor: compruébalo "
-                                          "con una cuenta de prueba en un entorno autorizado",
-                             references=["CWE-352", "OWASP ASVS V4.2.2"], confidence="baja")
+                    csrf = {"state": "unknown", "fields": [], "evidence": "heuristic"}
+                    csrf_state = _worst(csrf_state, "finding")
+                    self.add("csrf", tr("{form}: no CSRF protection visible (pending verification)", form=label),
+                             "medium", "pending",
+                             tr("{method} {action} without a hidden token field or SameSite cookies",
+                                method=form["method"], action=action),
+                             tr("Use a per-session CSRF token or check Origin/Referer on the server"),
+                             impact=tr("Without another defense, another site could submit the form on the user's behalf"),
+                             verification=tr("The protection may live in headers or on the server: check it with a "
+                                             "test account in an authorized environment"),
+                             references=["CWE-352", "OWASP ASVS V4.2.2"], confidence="low")
             else:
-                csrf = {"state": "no_aplicable", "fields": [], "evidence": "directa"}
+                csrf = {"state": "not_applicable", "fields": [], "evidence": "direct"}
             row["csrf"] = csrf
             if passwords:
                 if form["method"] == "GET":
-                    self.add("formularios", f"{label}: la contraseña se envía por GET (queda en la URL)", "alta",
-                             "confirmado", f"<form method='GET' action='{action}'> con campo password",
-                             "Usa method='post' en formularios con contraseña",
-                             impact="La contraseña queda en historiales, registros del servidor y Referer",
+                    self.add("forms", tr("{form}: the password is sent by GET (it ends up in the URL)", form=label),
+                             "high", "confirmed",
+                             tr("<form method='GET' action='{action}'> with a password field", action=action),
+                             tr("Use method='post' on forms with a password"),
+                             impact=tr("The password ends up in histories, server logs and the Referer"),
                              references=["CWE-598"])
                 if parse.urlsplit(action).scheme == "http" or not self.https:
-                    self.add("formularios", f"{label}: la contraseña viaja por HTTP sin cifrar", "alta", "confirmado",
-                             f"Página {self.final} · destino {action}", "Sirve la página y el destino por HTTPS",
-                             impact="Cualquiera en la red puede leer la contraseña", references=["CWE-319"])
+                    self.add("forms", tr("{form}: the password travels over unencrypted HTTP", form=label), "high",
+                             "confirmed", tr("Page {page} · destination {action}", page=self.final, action=action),
+                             tr("Serve the page and the destination over HTTPS"),
+                             impact=tr("Anyone on the network can read the password"), references=["CWE-319"])
             if parse.urlsplit(action).netloc != parse.urlsplit(self.final).netloc:
-                self.add("formularios", f"{label}: envía datos a otro origen", "info", "informativo",
-                         f"destino {action}", "Comprueba que el destino es tuyo y de confianza", confidence="media")
+                self.add("forms", tr("{form}: sends data to another origin", form=label), "info", "informational",
+                         tr("destination {action}", action=action),
+                         tr("Check that the destination is yours and trusted"), confidence="medium")
             rows.append(row)
-        self.check("formularios", "ok" if page.forms else "no_aplicable")
-        self.check("csrf", csrf_state, "directa" if csrf_state == "ok" else "heuristica")
+        self.check("forms", "ok" if page.forms else "not_applicable")
+        self.check("csrf", csrf_state, "direct" if csrf_state == "ok" else "heuristic")
         return rows
 
     def cors(self):
@@ -483,21 +501,24 @@ class _Audit:
         proof = f"Origin: {CORS_PROBE} → Access-Control-Allow-Origin: {allow}" + \
             ("; Access-Control-Allow-Credentials: true" if credentials else "")
         if allow == CORS_PROBE:
-            self.check("cors", "hallazgo")
-            self.add("cors", "CORS acepta cualquier origen" + (" con credenciales" if credentials else ""),
-                     "alta" if credentials else "baja", "confirmado" if credentials else "probable", proof,
-                     "Usa una lista cerrada de orígenes permitidos",
-                     impact="Otro sitio podría leer respuestas" + (" autenticadas del usuario" if credentials else ""),
-                     verification="Repite la petición con otra cabecera Origin y compara la respuesta",
+            self.check("cors", "finding")
+            self.add("cors", tr("CORS accepts any origin with credentials") if credentials
+                     else tr("CORS accepts any origin"),
+                     "high" if credentials else "low", "confirmed" if credentials else "likely", proof,
+                     tr("Use a closed list of allowed origins"),
+                     impact=tr("Another site could read the user's authenticated responses") if credentials
+                     else tr("Another site could read responses"),
+                     verification=tr("Repeat the request with another Origin header and compare the response"),
                      references=["CWE-942", "OWASP ASVS V14.5.3"])
         elif allow == "null":
-            self.check("cors", "hallazgo")
-            self.add("cors", "CORS permite el origen null", "media", "confirmado", proof,
-                     "No incluyas 'null' entre los orígenes permitidos", references=["CWE-942"])
+            self.check("cors", "finding")
+            self.add("cors", tr("CORS allows the null origin"), "medium", "confirmed", proof,
+                     tr("Do not include 'null' among the allowed origins"), references=["CWE-942"])
         elif allow == "*":
             self.check("cors", "ok")
-            self.add("cors", "CORS público (*): cualquier sitio puede leer esta respuesta sin credenciales", "info",
-                     "informativo", proof, "Correcto para contenido público; revísalo si la respuesta es privada")
+            self.add("cors", tr("Public CORS (*): any site can read this response without credentials"), "info",
+                     "informational", proof,
+                     tr("Fine for public content; review it if the response is private"))
         else:
             self.check("cors", "ok")
         return result
@@ -509,48 +530,51 @@ class _Audit:
             if match:
                 found.append(name)
                 start = max(0, match.start() - 40)
-                self.add("errores", name, "media", "confirmado", text[start:match.end() + 120],
-                         "Desactiva el modo depuración y muestra páginas de error genéricas",
-                         impact="Revela rutas, versiones o consultas internas que facilitan un ataque",
+                self.add("errors", tr(name), "medium", "confirmed", text[start:match.end() + 120],
+                         tr("Disable debug mode and show generic error pages"),
+                         impact=tr("Reveals internal paths, versions or queries that make an attack easier"),
                          references=["CWE-209", "OWASP ASVS V7.4.1"])
-        self.check("errores", "hallazgo" if found else "ok", "heuristica",
-                   detail=None if status < 500 or found else f"HTTP {status} sin detalles técnicos visibles")
+        self.check("errors", "finding" if found else "ok", "heuristic",
+                   detail=None if status < 500 or found
+                   else tr("HTTP {status} without visible technical details", status=status))
 
     def exposure(self, text):
         state = "ok"
         for name, pattern, severity, status, cwe in SECRET_SIGNATURES:
             matches = re.findall(pattern, text)
             if matches:
-                state = "hallazgo"
-                self.add("exposicion", name, severity, status, f"{len(matches)} coincidencia(s): {matches[0]}",
-                         "Retira el dato de la respuesta y, si es una credencial, revócala y genera otra",
-                         verification="Busca el valor en el código fuente y comprueba si sigue siendo válido "
-                                      "con su propietario", references=[cwe],
-                         confidence="alta" if status == "confirmado" else "media")
-        self.check("exposicion", state, "heuristica")
+                state = "finding"
+                self.add("exposure", tr(name), severity, status,
+                         tr("{count} match(es): {first}", count=len(matches), first=matches[0]),
+                         tr("Remove the data from the response and, if it is a credential, revoke it and issue "
+                            "a new one"),
+                         verification=tr("Look for the value in the source code and check with its owner "
+                                         "whether it is still valid"), references=[cwe],
+                         confidence="high" if status == "confirmed" else "medium")
+        self.check("exposure", state, "heuristic")
 
     def root(self, response, page):
         parts = parse.urlsplit(self.final)
         root_url = parse.urlunsplit((parts.scheme, parts.netloc, "/", "", ""))
         mine = _fingerprint(response, page)
         if self.final == root_url:
-            self.check("raiz", "no_aplicable")
+            self.check("root", "not_applicable")
             return {"url": root_url, "same_as_target": True}
         try:
             other = self.get(root_url)
         except (OSError, ValueError) as exc:
-            self.check("raiz", "error", detail=str(exc))
+            self.check("root", "error", detail=str(exc))
             return {"url": root_url, "error": str(exc)}
         other_page = parse_page(other.body.decode(_charset(other.header("content-type")), "replace"))
         theirs = _fingerprint(other, other_page)
-        self.check("raiz", "ok")
+        self.check("root", "ok")
         return {"url": root_url, "final_url": other.url, **theirs,
                 "differs": (mine["status"], mine["title"], mine["sha256"]) !=
                            (theirs["status"], theirs["title"], theirs["sha256"])}
 
 
 def _worst(current, new):
-    rank = {"no_aplicable": 0, "ok": 1, "hallazgo": 2}
+    rank = {"not_applicable": 0, "ok": 1, "finding": 2}
     return new if rank[new] > rank[current] else current
 
 
@@ -560,10 +584,10 @@ def _charset(content_type):
     try:
         "".encode(name)
         return name
-    except (LookupError, ValueError):  # códec desconocido o no utilizable (p. ej. "undefined")
+    except (LookupError, ValueError):  # unknown or unusable codec (e.g. "undefined")
         return "utf-8"
 
 
 def audit(url, args):
-    """Auditoría pasiva de una URL completa. ``args`` aporta timeout, scope, allow_private e insecure_tls."""
+    """Passive audit of a full URL. ``args`` provides timeout, scope, allow_private and insecure_tls."""
     return _Audit(url, args).run()

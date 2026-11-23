@@ -20,8 +20,8 @@ warn()    { echo -e "  ${Y}[!]${NC} $1"; }
 info()    { echo -e "  ${DIM}ℹ  $1${NC}"; }
 
 module_whois() {
-    command -v whois >/dev/null 2>&1 || { warn "WHOIS opcional no disponible; usa el módulo RDAP portable"; return 0; }
-    header "3 ▸ WHOIS — PROPIETARIO"
+    command -v whois >/dev/null 2>&1 || { warn "Optional WHOIS not available; use the portable RDAP module"; return 0; }
+    header "3 ▸ WHOIS — OWNER"
 
     local whois_target="${DOMAIN:-$IP}"
     local WHOIS_DATA
@@ -47,24 +47,24 @@ module_whois() {
     abuse_phone=$(parse_whois "Registrar Abuse Contact Phone\|phone")
     iana_id=$(parse_whois "Registrar IANA ID")
 
-    section "Datos del Registrar"
+    section "Registrar data"
     kv "Registrar"           "${registrar:-N/A}"
     kv "IANA ID"             "${iana_id:-N/A}"
-    kv "URL Registrar"       "${reg_url:-N/A}"
-    kv "Email abuso"         "${abuse_email:-N/A}"
-    kv "Teléfono abuso"      "${abuse_phone:-N/A}"
+    kv "Registrar URL"       "${reg_url:-N/A}"
+    kv "Abuse email"         "${abuse_email:-N/A}"
+    kv "Abuse phone"         "${abuse_phone:-N/A}"
 
-    section "Datos del Registrante"
-    kv "Organización"        "${reg_org:-N/A (privado)}"
-    kv "País registrante"    "${reg_country:-N/A}"
-    kv "Email admin"         "${admin_email:-N/A (privacidad RDAP)}"
+    section "Registrant data"
+    kv "Organization"        "${reg_org:-N/A (private)}"
+    kv "Registrant country"  "${reg_country:-N/A}"
+    kv "Admin email"         "${admin_email:-N/A (RDAP privacy)}"
 
-    section "Fechas del Dominio"
-    kv "Fecha creación"      "${created:-N/A}"
-    kv "Última actualiz."    "${updated:-N/A}"
-    kv "Expiración"          "${expires:-N/A}"
+    section "Domain dates"
+    kv "Creation date"       "${created:-N/A}"
+    kv "Last updated"        "${updated:-N/A}"
+    kv "Expiration"          "${expires:-N/A}"
 
-    # Calcular días para expiración
+    # Compute days until expiration
     if [[ -n "$expires" ]]; then
         local exp_ts now_ts days_left
         exp_ts=$(date -d "$expires" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%SZ" "$expires" +%s 2>/dev/null)
@@ -72,31 +72,31 @@ module_whois() {
         if [[ -n "$exp_ts" ]]; then
             days_left=$(( (exp_ts - now_ts) / 86400 ))
             if [[ $days_left -lt 30 ]]; then
-                kv_r "⚠ Días para expirar" "${days_left} días"
+                kv_r "⚠ Days until expiry" "${days_left} days"
             elif [[ $days_left -lt 90 ]]; then
-                kv_y "Días para expirar" "${days_left} días"
+                kv_y "Days until expiry" "${days_left} days"
             else
-                ok "Expira en ${days_left} días"
+                ok "Expires in ${days_left} days"
             fi
         fi
     fi
 
-    section "Estado y DNS"
+    section "Status and DNS"
     local st_line
     while IFS= read -r st_line; do
         [[ -n "$st_line" ]] && echo "$st_line" | grep -qi "prohibit" \
-            && kv_y "Estado" "$st_line" \
-            || kv "Estado" "$st_line"
+            && kv_y "Status" "$st_line" \
+            || kv "Status" "$st_line"
     done < <(echo "$WHOIS_DATA" | grep -i "Domain Status:" | head -5 | sed 's/.*: *//')
     kv "Name Servers"        "${name_servers:-N/A}"
     kv "DNSSEC"              "${dnssec:-N/A}"
 
-    section "WHOIS raw (50 líneas)"
+    section "Raw WHOIS (50 lines)"
     echo "$WHOIS_DATA" | head -50 | while IFS= read -r line; do
         echo -e "  ${DIM}${line}${NC}"
     done
 }
 
 # ════════════════════════════════════════════════════════════════════
-# MÓDULO: HTTP
+# MODULE: HTTP
 # ════════════════════════════════════════════════════════════════════

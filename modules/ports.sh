@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ================================================================
-#  ports.sh — Escaneo de puertos
+#  ports.sh — Port scanning
 #  DomainInfo v3.2.0 — @kevxngg (Kevin)
 # ================================================================
 # shellcheck disable=SC2034,SC1091
@@ -23,13 +23,13 @@ if ! declare -f header &>/dev/null; then
 fi
 
 module_ports() {
-    header "5 ▸ ESCANEO DE PUERTOS"
+    header "5 ▸ PORT SCAN"
     local scan_target="${IP:-$TARGET}"
-    [[ -z "$scan_target" ]] && { warn "Sin objetivo para escanear"; return; }
+    [[ -z "$scan_target" ]] && { warn "No target to scan"; return; }
 
     if command -v nmap &>/dev/null; then
-        section "Nmap — Top 100 puertos + detección de versión"
-        warn "Esto puede tardar 30-60 segundos..."
+        section "Nmap — Top 100 ports + version detection"
+        warn "This may take 30-60 seconds..."
         echo ""
         local nmap_out
         nmap_out=$(nmap -sT -T4 --host-timeout 90s --top-ports 100 -sV --open \
@@ -39,7 +39,7 @@ module_ports() {
         open_ports=$(echo "$nmap_out" | grep "^[0-9]" | grep "open")
 
         if [[ -n "$open_ports" ]]; then
-            printf "  ${W}${BOLD}%-22s %-10s %-15s %s${NC}\n" "PUERTO" "ESTADO" "SERVICIO" "VERSIÓN"
+            printf "  ${W}${BOLD}%-22s %-10s %-15s %s${NC}\n" "PORT" "STATE" "SERVICE" "VERSION"
             echo -e "  ${DIM}$(printf '─%.0s' {1..56})${NC}"
             while IFS= read -r line; do
                 local port state service version
@@ -51,18 +51,18 @@ module_ports() {
                     "$port" "$state" "$service" "$version"
             done <<< "$open_ports"
         else
-            info "No se detectaron puertos abiertos (top 100)"
+            info "No open ports detected (top 100)"
         fi
 
-        section "Resultados de scripts NSE"
+        section "NSE script results"
         echo "$nmap_out" | grep -A2 "| " | grep -v "^--$" | while IFS= read -r l; do
             [[ -n "$l" ]] && echo -e "  ${DIM}$l${NC}"
         done
 
     else
-        # ── Fallback: comprobación manual con paralelismo correcto ──
-        section "Comprobación manual de puertos comunes"
-        warn "nmap no disponible — usando fallback (puede tardar ~30s)"
+        # ── Fallback: manual check with proper parallelism ──
+        section "Manual check of common ports"
+        warn "nmap not available — using fallback (may take ~30s)"
         echo ""
 
         local common_ports=(21 22 23 25 53 80 110 143 443 445 587 993 995 3306 3389 5432 6379 8080 8443 27017)
@@ -70,26 +70,26 @@ module_ports() {
         # shellcheck disable=SC2064
         _TMPDIR_GLOBAL="$tmpdir"
 
-        printf "  ${W}${BOLD}%-20s %s${NC}\n" "PUERTO" "ESTADO"
+        printf "  ${W}${BOLD}%-20s %s${NC}\n" "PORT" "STATE"
         echo -e "  ${DIM}$(printf '─%.0s' {1..30})${NC}"
 
         for port in "${common_ports[@]}"; do
-            # Cada check en su propio subshell con timeout independiente
+            # Each check in its own subshell with an independent timeout
             (
                 if timeout 3 bash -c "echo >/dev/tcp/${scan_target}/${port}" 2>/dev/null; then
                     echo "$port" >> "${tmpdir}/open"
                 fi
             ) &
         done
-        # Esperar todos los checks de puertos
+        # Wait for all port checks
         wait
 
         if [[ -f "${tmpdir}/open" ]]; then
             sort -n "${tmpdir}/open" | while IFS= read -r p; do
-                printf "  ${G}%-20s${NC} ${G}%s${NC}\n" "$p/tcp" "ABIERTO"
+                printf "  ${G}%-20s${NC} ${G}%s${NC}\n" "$p/tcp" "OPEN"
             done
         else
-            info "No se encontraron puertos abiertos en la lista común"
+            info "No open ports found in the common list"
         fi
     fi
 }

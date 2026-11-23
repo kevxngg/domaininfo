@@ -25,7 +25,7 @@ fi
 module_waf() {
     is_ip "$TARGET" && return
     header "10 ▸ WAF / CDN DETECTION"
-    section "Detección de Firewall de Aplicaciones Web"
+    section "Web Application Firewall detection"
 
     local base_url="https://${DOMAIN}"
     curl -s --max-time 5 "$base_url" &>/dev/null || base_url="http://${DOMAIN}"
@@ -34,7 +34,7 @@ module_waf() {
     headers=$(curl -sIL --max-time 8 "$base_url" 2>/dev/null)
     local waf_detected=""
 
-    # Detectar WAF/CDN por headers
+    # Detect WAF/CDN from headers
     if   echo "$headers" | grep -qi "cloudflare\|cf-ray\|__cfduid";           then waf_detected="Cloudflare"
     elif echo "$headers" | grep -qi "x-sucuri\|sucuri";                        then waf_detected="Sucuri WAF"
     elif echo "$headers" | grep -qi "x-akamai\|akamaighost";                  then waf_detected="Akamai"
@@ -45,20 +45,20 @@ module_waf() {
     elif echo "$headers" | grep -qi "server.*nginx\|server.*apache"; then
         local svr
         svr=$(echo "$headers" | grep -i "^server:" | head -1 | cut -d: -f2- | xargs)
-        waf_detected="Sin WAF detectado — Servidor: $svr"
+        waf_detected="No WAF detected — Server: $svr"
     fi
 
     if [[ -n "$waf_detected" ]]; then
-        kv_y "WAF/CDN detectado" "$waf_detected"
-        info "El WAF puede limitar algunas técnicas de reconocimiento activo"
+        kv_y "WAF/CDN detected" "$waf_detected"
+        info "The WAF may limit some active reconnaissance techniques"
     else
-        kv "WAF/CDN" "No detectado o no identificado"
+        kv "WAF/CDN" "Not detected or not identified"
     fi
 
-    # ── Puntuación de headers de seguridad ───────────────────────
-    section "Puntuación de Headers de Seguridad"
+    # ── Security header score ────────────────────────────────────
+    section "Security header score"
 
-    # TODAS las variables son locales — evita contaminar el namespace global
+    # ALL variables are local — avoids polluting the global namespace
     local score=0 total=7
     local hsts csp xfo xcto rp pp cors_val cors_hdr
 
@@ -70,14 +70,14 @@ module_waf() {
     pp=$(echo "$headers"       | grep -i "permissions-policy\|feature-policy" | head -1)
     cors_hdr=$(echo "$headers" | grep -i "access-control-allow-origin" | head -1)
 
-    # Función interna (local al módulo en tiempo de ejecución)
+    # Internal function (local to the module at runtime)
     _check_header() {
         local name="$1" val="$2"
         if [[ -n "$val" ]]; then
-            ok "$name presente"
+            ok "$name present"
             (( score++ ))
         else
-            kv_r "✗ Falta $name" "header de seguridad ausente"
+            kv_r "✗ Missing $name" "security header missing"
         fi
     }
 
@@ -88,26 +88,26 @@ module_waf() {
     _check_header "Referrer-Policy"           "$rp"
     _check_header "Permissions-Policy"        "$pp"
 
-    # CORS — usar variable local (no global)
+    # CORS — use a local variable (not a global one)
     if [[ -n "$cors_hdr" ]]; then
         cors_val=$(echo "$cors_hdr" | cut -d: -f2- | xargs)
         if [[ "$cors_val" == "*" ]]; then
-            kv_r "⚠ CORS" "Access-Control-Allow-Origin: * (demasiado permisivo)"
+            kv_r "⚠ CORS" "Access-Control-Allow-Origin: * (too permissive)"
         else
-            ok "CORS configurado: $cors_val"
+            ok "CORS configured: $cors_val"
             (( score++ ))
         fi
     fi
 
-    # Desregistrar helper interno para no ensuciar el namespace
+    # Unregister the internal helper so it does not clutter the namespace
     unset -f _check_header
 
     echo ""
     local grade
-    if   [[ $score -ge 6 ]]; then grade="A — Excelente"
-    elif [[ $score -ge 4 ]]; then grade="B — Buena"
-    elif [[ $score -ge 2 ]]; then grade="C — Regular"
-    else                          grade="F — Deficiente"
+    if   [[ $score -ge 6 ]]; then grade="A — Excellent"
+    elif [[ $score -ge 4 ]]; then grade="B — Good"
+    elif [[ $score -ge 2 ]]; then grade="C — Fair"
+    else                          grade="F — Poor"
     fi
-    kv "Puntuación headers" "$score/$total — Grado $grade"
+    kv "Header score" "$score/$total — Grade $grade"
 }

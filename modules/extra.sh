@@ -21,10 +21,10 @@ info()    { echo -e "  ${DIM}ℹ  $1${NC}"; }
 
 module_extra() {
     is_ip "$TARGET" && return
-    header "9 ▸ RECONOCIMIENTO WEB EXTRA"
+    header "9 ▸ EXTRA WEB RECONNAISSANCE"
 
     local base_url="https://${DOMAIN}"
-    # Intentar HTTP si HTTPS falla
+    # Fall back to HTTP if HTTPS fails
     curl -s --max-time 5 "$base_url" &>/dev/null || base_url="http://${DOMAIN}"
 
     section "robots.txt"
@@ -32,12 +32,12 @@ module_extra() {
     robots=$(curl -sL --max-time 8 "${base_url}/robots.txt" 2>/dev/null | head -30)
     if [[ -n "$robots" && "$robots" != *"404"* && "$robots" != *"Not Found"* ]]; then
         echo "$robots" | while IFS= read -r l; do echo -e "  ${DIM}$l${NC}"; done
-        # Directorios interesantes en Disallow
+        # Interesting directories in Disallow
         local disallowed
         disallowed=$(echo "$robots" | grep -i "Disallow:" | awk '{print $2}' | head -10 | tr '\n' ' ')
         [[ -n "$disallowed" ]] && kv_y "Disallowed paths" "$disallowed"
     else
-        info "robots.txt no encontrado o vacío"
+        info "robots.txt not found or empty"
     fi
 
     section "sitemap.xml"
@@ -46,15 +46,15 @@ module_extra() {
     if [[ -n "$sitemap" && "$sitemap" == *"xml"* ]]; then
         local url_count
         url_count=$(echo "$sitemap" | grep -c "<loc>")
-        ok "sitemap.xml encontrado ($url_count URLs en primeras 20 líneas)"
+        ok "sitemap.xml found ($url_count URLs in the first 20 lines)"
         echo "$sitemap" | grep "<loc>" | sed 's/.*<loc>//;s/<\/loc>//' | head -5 | while IFS= read -r u; do
             echo -e "  ${DIM}$u${NC}"
         done
     else
-        info "sitemap.xml no encontrado"
+        info "sitemap.xml not found"
     fi
 
-    section "Archivos expuestos comunes"
+    section "Common exposed files"
     local sensitive_paths=()
     local paths_file="${SCRIPT_DIR}/wordlists/paths.txt"
     if [[ -f "$paths_file" ]]; then
@@ -73,12 +73,12 @@ module_extra() {
         local code
         code=$(curl -sI --max-time 5 "${base_url}${path}" 2>/dev/null | head -1 | awk '{print $2}')
         if [[ "$code" == "200" ]]; then
-            kv_r "⚠ EXPUESTO" "${base_url}${path} [200 OK]"
+            kv_r "⚠ EXPOSED" "${base_url}${path} [200 OK]"
         fi
     done
-    ok "Escaneo de rutas sensibles completado"
+    ok "Sensitive path scan complete"
 }
 
 # ════════════════════════════════════════════════════════════════════
-# MÓDULO: RESUMEN Y GUARDADO
+# MODULE: SUMMARY AND SAVING
 # ════════════════════════════════════════════════════════════════════

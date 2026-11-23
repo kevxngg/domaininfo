@@ -1,10 +1,12 @@
-"""Seguridad del correo de un dominio: SPF, DMARC, DKIM, MTA-STS, TLS-RPT y BIMI.
+"""Mail security of a domain: SPF, DMARC, DKIM, MTA-STS, TLS-RPT and BIMI.
 
-Solo consultas DNS públicas (y la política MTA-STS por HTTPS). Las funciones de
-análisis son puras para poder probarlas sin red.
+Public DNS queries only (plus the MTA-STS policy over HTTPS). The analysis functions
+are pure so they can be tested without a network.
 """
 
 import re
+
+from i18n import tr
 
 DKIM_SELECTORS = ("default", "google", "selector1", "selector2", "k1", "k2", "s1", "s2",
                   "mail", "dkim", "smtp", "mx", "email", "mandrill", "everlytickey1",
@@ -13,34 +15,37 @@ SPF_LOOKUP_TERMS = ("include:", "a", "a:", "mx", "mx:", "ptr", "ptr:", "exists:"
 
 
 def analyze_spf(records):
-    """records: TXT del dominio. Devuelve política, mecanismos y problemas."""
+    """records: TXT records of the domain. Returns the policy, the mechanisms and the issues.
+
+    When ``present`` is False the only issue is the missing record itself (score.py relies on it)."""
     spf = [r for r in records if r.lower().startswith("v=spf1")]
     if not spf:
-        return {"present": False, "issues": ["Sin registro SPF: cualquiera puede decir que envía por este dominio"]}
+        return {"present": False,
+                "issues": [tr("No SPF record: anyone can claim to send mail for this domain")]}
     result = {"present": True, "record": spf[0], "issues": []}
     if len(spf) > 1:
-        result["issues"].append("Hay varios registros SPF; los receptores lo tratan como error (permerror)")
+        result["issues"].append(tr("Several SPF records; receivers treat this as an error (permerror)"))
     terms = spf[0].split()[1:]
     result["mechanisms"] = terms
     lookups = sum(1 for t in terms if t.lstrip("+-~?").lower().startswith(SPF_LOOKUP_TERMS)
                   and t.lstrip("+-~?").lower() not in ("all",))
     result["dns_lookups"] = lookups
     if lookups > 10:
-        result["issues"].append(f"{lookups} consultas DNS directas (máximo 10): el SPF puede fallar")
+        result["issues"].append(tr("{lookups} direct DNS lookups (maximum 10): SPF may fail", lookups=lookups))
     all_term = next((t for t in terms if t.lstrip("+-~?").lower() == "all"), None)
     qualifier = {"-": "fail", "~": "softfail", "?": "neutral", "+": "pass"}
     if all_term is None:
         result["all"] = None
         if not any(t.lower().startswith("redirect=") for t in terms):
-            result["issues"].append("Falta '-all' o '~all': el SPF no rechaza remitentes no autorizados")
+            result["issues"].append(tr("Missing '-all' or '~all': SPF does not reject unauthorized senders"))
     else:
         result["all"] = qualifier.get(all_term[0], "pass")
         if result["all"] == "pass":
-            result["issues"].append("'+all' autoriza a cualquier servidor: el SPF no protege")
+            result["issues"].append(tr("'+all' authorizes any server: SPF gives no protection"))
         elif result["all"] == "neutral":
-            result["issues"].append("'?all' no indica nada a los receptores")
+            result["issues"].append(tr("'?all' tells receivers nothing"))
     if any(t.lstrip("+-~?").lower().startswith("ptr") for t in terms):
-        result["issues"].append("El mecanismo 'ptr' está desaconsejado (RFC 7208)")
+        result["issues"].append(tr("The 'ptr' mechanism is discouraged (RFC 7208)"))
     return result
 
 
@@ -56,7 +61,8 @@ def parse_tags(record):
 def analyze_dmarc(records):
     dmarc = [r for r in records if r.lower().replace(" ", "").startswith("v=dmarc1")]
     if not dmarc:
-        return {"present": False, "issues": ["Sin DMARC: los receptores no saben qué hacer con correos falsos"]}
+        return {"present": False,
+                "issues": [tr("No DMARC: receivers do not know what to do with forged mail")]}
     tags = parse_tags(dmarc[0])
     policy = tags.get("p", "").lower()
     result = {"present": True, "record": dmarc[0], "policy": policy or None,
@@ -64,15 +70,15 @@ def analyze_dmarc(records):
               "pct": int(tags["pct"]) if tags.get("pct", "").isdigit() else 100,
               "reports": tags.get("rua"), "issues": []}
     if len(dmarc) > 1:
-        result["issues"].append("Hay varios registros DMARC: se ignoran todos")
+        result["issues"].append(tr("Several DMARC records: all of them are ignored"))
     if policy not in ("none", "quarantine", "reject"):
-        result["issues"].append("Política DMARC 'p=' ausente o inválida")
+        result["issues"].append(tr("DMARC policy 'p=' missing or invalid"))
     elif policy == "none":
-        result["issues"].append("p=none solo vigila: los correos falsos siguen llegando")
+        result["issues"].append(tr("p=none only monitors: forged mail is still delivered"))
     if result["pct"] < 100 and policy in ("quarantine", "reject"):
-        result["issues"].append(f"Solo se aplica al {result['pct']} % de los correos (pct)")
+        result["issues"].append(tr("Applied to only {pct}% of messages (pct)", pct=result["pct"]))
     if not result["reports"]:
-        result["issues"].append("Sin 'rua': no recibes informes de quién envía en tu nombre")
+        result["issues"].append(tr("No 'rua': you get no reports on who sends mail in your name"))
     return result
 
 
@@ -86,11 +92,11 @@ def analyze_mta_sts(txt_records, policy_text):
 
 
 def grade(spf, dmarc, dkim_found, mta_sts, has_mx):
-    """Nota A–F y si el dominio es suplantable."""
+    """A–F grade and whether the domain can be spoofed."""
     strong_spf = spf.get("present") and spf.get("all") in ("fail", "softfail")
     enforcing = dmarc.get("present") and dmarc.get("policy") in ("quarantine", "reject")
-    # Sin DMARC que rechace o ponga en cuarentena, el remitente visible (From) se puede falsificar
-    # aunque el SPF sea estricto: el SPF solo valida el remitente del sobre.
+    # Without a DMARC policy that rejects or quarantines, the visible sender (From) can be forged
+    # even with a strict SPF: SPF only validates the envelope sender.
     spoofable = not enforcing
     if strong_spf and enforcing and dmarc.get("pct", 100) == 100 and dkim_found:
         letter = "A" if mta_sts.get("mode") == "enforce" or not has_mx else "A-"
@@ -106,7 +112,7 @@ def grade(spf, dmarc, dkim_found, mta_sts, has_mx):
 
 
 def audit(domain, txt, timeout, fetch=None):
-    """txt(nombre) -> lista de TXT; mx(nombre) se obtiene con la misma función de DNS."""
+    """txt(name) -> list of TXT records; MX records come from the same DNS client."""
     import dnsclient
     lookup = txt or (lambda name: dnsclient.values(name, "TXT", timeout))
     try:
@@ -120,7 +126,7 @@ def audit(domain, txt, timeout, fetch=None):
     for selector in DKIM_SELECTORS:
         try:
             records = lookup(f"{selector}._domainkey.{domain}")
-        except Exception:  # noqa: BLE001 - un selector que falla no invalida el resto
+        except Exception:  # noqa: BLE001 - one failing selector does not invalidate the rest
             continue
         if any("p=" in r for r in records):
             dkim.append(selector)
@@ -141,5 +147,5 @@ def audit(domain, txt, timeout, fetch=None):
             "mx": [] if null_mx else sorted(mx, key=lambda r: r["priority"]),
             "accepts_mail": bool(mx) and not null_mx, "spf": spf, "dmarc": dmarc,
             "dkim": {"selectors_found": dkim, "checked": len(DKIM_SELECTORS),
-                     "note": "Solo se prueban selectores comunes; puede haber otros"},
+                     "note": tr("Only common selectors are tried; others may exist")},
             "mta_sts": mta_sts, "tls_rpt": tls_rpt, "bimi": bimi}

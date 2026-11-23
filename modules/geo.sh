@@ -20,8 +20,8 @@ warn()    { echo -e "  ${Y}[!]${NC} $1"; }
 info()    { echo -e "  ${DIM}ℹ  $1${NC}"; }
 
 module_geo() {
-    header "2 ▸ GEOLOCALIZACIÓN E INFO IP"
-    [[ -z "$IP" ]] && { warn "No hay IP para geolocalizar"; return; }
+    header "2 ▸ GEOLOCATION AND IP INFO"
+    [[ -z "$IP" ]] && { warn "No IP to geolocate"; return; }
 
     # ipinfo.io
     section "ipinfo.io"
@@ -39,16 +39,16 @@ module_geo() {
 
         kv "IP"             "$IP"
         kv "Hostname"       "${GEO_HOST:-N/A}"
-        kv "Organización"   "${GEO_ORG:-N/A}"
-        kv "Ciudad"         "${GEO_CITY:-N/A}"
-        kv "Región"         "${GEO_REGION:-N/A}"
-        kv "País (código)"  "${GEO_COUNTRY:-N/A}"
-        kv "Código postal"  "${GEO_POSTAL:-N/A}"
-        kv "Coordenadas"    "${GEO_COORDS:-N/A}"
-        kv "Zona horaria"   "${GEO_TZ:-N/A}"
+        kv "Organization"   "${GEO_ORG:-N/A}"
+        kv "City"           "${GEO_CITY:-N/A}"
+        kv "Region"         "${GEO_REGION:-N/A}"
+        kv "Country (code)" "${GEO_COUNTRY:-N/A}"
+        kv "Postal code"    "${GEO_POSTAL:-N/A}"
+        kv "Coordinates"    "${GEO_COORDS:-N/A}"
+        kv "Time zone"      "${GEO_TZ:-N/A}"
         [[ -n "$GEO_COORDS" ]] && kv "Google Maps" "https://maps.google.com/?q=${GEO_COORDS}"
     else
-        fail "No se pudo contactar ipinfo.io"
+        fail "Could not reach ipinfo.io"
     fi
 
     # ip-api.com
@@ -71,36 +71,36 @@ module_geo() {
         GEO_DIST=$(echo   "$geo2" | grep -oP '"district"\s*:\s*"\K[^"]+')
 
         kv "ISP"                "${GEO_ISP:-N/A}"
-        kv "Organización ASN"   "${GEO_ASN:-N/A}"
+        kv "ASN organization"   "${GEO_ASN:-N/A}"
         kv "AS Name"            "${GEO_ASNAME:-N/A}"
-        kv "Continente"         "${GEO_CONT:-N/A}"
-        kv "Latitud"            "${GEO_LAT:-N/A}"
-        kv "Longitud"           "${GEO_LON:-N/A}"
-        [[ -n "$GEO_DIST" ]]   && kv "Distrito" "$GEO_DIST"
-        [[ -n "$GEO_CURR" ]]   && kv "Moneda local" "$GEO_CURR"
+        kv "Continent"          "${GEO_CONT:-N/A}"
+        kv "Latitude"           "${GEO_LAT:-N/A}"
+        kv "Longitude"          "${GEO_LON:-N/A}"
+        [[ -n "$GEO_DIST" ]]   && kv "District" "$GEO_DIST"
+        [[ -n "$GEO_CURR" ]]   && kv "Local currency" "$GEO_CURR"
 
         echo ""
         if [[ "$GEO_PROXY" == "true" ]]; then
-            kv_r "⚠ Proxy/VPN/Tor" "DETECTADO"
+            kv_r "⚠ Proxy/VPN/Tor" "DETECTED"
         else
-            ok "Sin proxy/VPN detectado"
+            ok "No proxy/VPN detected"
         fi
         if [[ "$GEO_HOSTING" == "true" ]]; then
-            kv_y "⚠ Datacenter/Hosting" "SÍ (IP de servidor)"
+            kv_y "⚠ Datacenter/Hosting" "YES (server IP)"
         else
-            ok "IP residencial/empresarial"
+            ok "Residential/business IP"
         fi
         if [[ "$GEO_MOBILE" == "true" ]]; then
-            kv_y "Conexión móvil" "SÍ"
+            kv_y "Mobile connection" "YES"
         else
-            kv "Conexión móvil" "No"
+            kv "Mobile connection" "No"
         fi
     else
-        fail "No se pudo contactar ip-api.com"
+        fail "Could not reach ip-api.com"
     fi
 
-    # Shodan (sin API key — info básica)
-    section "Shodan — Info pública"
+    # Shodan (no API key — basic info)
+    section "Shodan — Public info"
     local shodan
     shodan=$(curl -s --max-time 8 "https://internetdb.shodan.io/${IP}" 2>/dev/null)
     if [[ -n "$shodan" && "$shodan" != *"No information"* && "$shodan" != *"error"* ]]; then
@@ -108,18 +108,18 @@ module_geo() {
         ports=$(echo "$shodan" | grep -oP '"ports":\[\K[^\]]+')
         vulns=$(echo "$shodan" | grep -oP '"vulns":\[\K[^\]]+' | tr -d '"')
         hostnames=$(echo "$shodan" | grep -oP '"hostnames":\[\K[^\]]+' | tr -d '"')
-        [[ -n "$ports" ]]     && kv "Puertos (Shodan)" "$ports"
+        [[ -n "$ports" ]]     && kv "Ports (Shodan)" "$ports"
         [[ -n "$hostnames" ]] && kv "Hostnames" "${hostnames:0:80}"
         if [[ -n "$vulns" ]]; then
-            kv_r "⚠ CVEs detectados" "$vulns"
+            kv_r "⚠ CVEs detected" "$vulns"
         else
-            ok "Sin CVEs públicos en Shodan"
+            ok "No public CVEs on Shodan"
         fi
     else
-        info "Sin datos públicos en Shodan InternetDB"
+        info "No public data in Shodan InternetDB"
     fi
 }
 
 # ════════════════════════════════════════════════════════════════════
-# MÓDULO: WHOIS
+# MODULE: WHOIS
 # ════════════════════════════════════════════════════════════════════
