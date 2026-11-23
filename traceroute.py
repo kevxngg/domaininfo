@@ -8,9 +8,6 @@ Uso  : python3 traceroute.py <host> [max_hops]
 import socket
 import sys
 import time
-import struct
-import select
-import os
 
 def traceroute(dest_name, max_hops=15, timeout=2):
     try:
@@ -68,7 +65,7 @@ def traceroute(dest_name, max_hops=15, timeout=2):
             print(f"  {ttl:2d}  * * *  (timeout)")
 
         if curr_addr == dest_addr:
-            print(f"\n  Destino alcanzado.")
+            print("\n  Destino alcanzado.")
             break
 
 if __name__ == "__main__":

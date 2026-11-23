@@ -1,6 +1,5 @@
 """Pruebas sin red de las funciones de la versión 5."""
 
-import argparse
 import struct
 import sys
 import unittest

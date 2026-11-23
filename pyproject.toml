@@ -7,13 +7,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "domaininfo"
-version = "5.0.0"
-description = "Diagnóstico de dominios e IPs para Termux, Kali/Linux, macOS y Windows"
+version = "6.0.0a1"
+description = "Auditoría de dominios, infraestructura y aplicaciones web para Termux, Kali/Linux, macOS y Windows"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Kevin Hernández (kevxngg)" }]
-keywords = ["osint", "dns", "rdap", "tls", "dmarc", "spf", "subdomains", "typosquatting", "network-diagnostics", "routeros", "termux"]
+keywords = ["osint", "dns", "rdap", "tls", "dmarc", "spf", "subdomains", "typosquatting", "network-diagnostics",
+            "routeros", "termux", "web-security", "csp", "csrf", "cors"]
 classifiers = [
     "Environment :: Console",
     "Programming Language :: Python :: 3",
@@ -28,7 +29,18 @@ Author = "https://kevxngg.github.io/"
 [project.scripts]
 domaininfo = "domaininfo:entry"
 
+# El núcleo no tiene dependencias. Solo para desarrollo y CI:
+[project.optional-dependencies]
+dev = ["hypothesis", "ruff", "bandit", "pyright", "pip-audit"]
+
 [tool.setuptools]
 py-modules = ["domaininfo", "terminal_ui", "routeros", "report", "traceroute", "completions",
               "dnsclient", "mailsec", "netinfo", "tlsdeep", "webtech", "recon", "history",
-              "lookalike", "score", "infra", "render"]
+              "lookalike", "score", "infra", "render", "safety", "evidence", "webapp", "tools"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.bandit]
+exclude_dirs = ["tests"]

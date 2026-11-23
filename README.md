@@ -1,6 +1,9 @@
-# DomainInfo 5.0
+# DomainInfo 6.0 Security Suite (alfa · Fase 1)
 
-Diagnóstico de dominios e IPs para **Termux, Kali/Linux, macOS y Windows**, por [@kevxngg](https://github.com/kevxngg).
+Diagnóstico de dominios, IPs y aplicaciones web para **Termux, Kali/Linux, macOS y Windows**, por [@kevxngg](https://github.com/kevxngg).
+
+> 6.0 está en desarrollo por fases. La **Fase 1** (URL completa, módulo `webapp` pasivo, modelo de evidencias y
+> nueva puntuación) está hecha; el diseño y las fases siguientes están en [docs/V6_DESIGN.md](docs/V6_DESIGN.md).
 
 El núcleo portable usa **Python 3.10+ y su biblioteca estándar**: no requiere pip, root, Bash, Nmap ni compiladores. Los módulos Bash de la versión 3 se conservan para auditorías avanzadas; sus requisitos y limitaciones son distintos.
 
@@ -116,6 +119,51 @@ También puedes usar `py -3 domaininfo.py example.com`. El instalador opcional `
 | `mail` | e | Seguridad del correo: SPF, DMARC, DKIM, MTA-STS, TLS-RPT y BIMI, con nota y si se puede suplantar |
 | `recon` | s | Reconocimiento OSINT: subdominios (Certificate Transparency), posible toma de subdominios, red, tecnologías e historia |
 | `brand` | p | Marca y phishing: dominios parecidos registrados (errores de tecleo, homoglifos, otros TLD) y si reciben correo |
+| `webapp` | w | Seguridad de una URL concreta (pasivo): formularios, CSRF, cookies, CSP, clickjacking, CORS, errores técnicos y datos expuestos |
+
+### Novedades de la versión 6 (Fase 1)
+
+**Seguridad de aplicaciones web** con `-m webapp`. Se audita exactamente la URL indicada: protocolo, host,
+puerto, ruta y parámetros se conservan (`/login` no se sustituye por `/`).
+
+```bash
+python3 domaininfo.py -m webapp --url https://example.com/login
+python3 domaininfo.py -m webapp https://app.example.com:8443/admin?tab=1
+python3 domaininfo.py -m webapp --url https://app.example.com/ --scope auth.example.com,*.cdn.example.com
+python3 domaininfo.py -m webapp -f urls.txt --format all       # una URL por línea
+python3 domaininfo.py -m webapp --url http://127.0.0.1:8000/login   # tu aplicación en local
+```
+
+Qué revisa, **solo con peticiones GET y sin enviar formularios ni credenciales**:
+
+- Formularios: método y destino, campos de usuario y contraseña, contraseña por GET o por HTTP.
+- CSRF: token visible en el formulario (evidencia directa), token en `<meta>` o cookies SameSite (protección
+  alternativa) o **pendiente de verificar** si no hay evidencia. Un formulario sin token **no** se declara vulnerable.
+- Cookies: `Secure`, `HttpOnly`, `SameSite` (los valores nunca se guardan).
+- Cabeceras: HSTS, análisis de la CSP (`unsafe-inline`, `unsafe-eval`, comodines, `object-src`, `base-uri`),
+  clickjacking (`X-Frame-Options`/`frame-ancestors`), `Referrer-Policy`, `Permissions-Policy`, `nosniff`, versiones expuestas.
+- CORS: una petición con un `Origin` ficticio para ver si se refleja y si permite credenciales.
+- Redirecciones: se siguen solo dentro del alcance (máx. 5); se marcan las que bajan de HTTPS a HTTP.
+- Errores técnicos (trazas de Python, Java, PHP, .NET, Node, SQL…) y datos sensibles en la respuesta (claves privadas,
+  claves de AWS, tokens), con la evidencia ocultada.
+- Comparación con la raíz del sitio, para demostrar que la página auditada es la pedida.
+
+Cada hallazgo incluye identificador, ruta, categoría, gravedad, **estado** (confirmado, probable, informativo,
+pendiente de verificar, no aplicable, no evaluado, error), confianza, evidencia ocultada, herramienta, impacto,
+verificación segura, corrección y referencias CWE/OWASP. El reporte añade `assessment` con tres puntuaciones:
+**Security** (riesgo de lo comprobado), **Coverage** (parte comprobada) y **Confidence** (parte con evidencia
+directa). La nota clásica `score` (A–F) se mantiene igual.
+
+**Seguridad de la propia herramienta**: solo `http`/`https`, sin credenciales en la URL; alcance limitado al host de
+la URL más `--scope`; cada host se resuelve una vez y la conexión va a esa IP (contra DNS rebinding); nunca se
+visitan direcciones de enlace local (como `169.254.169.254`), multicast o reservadas; un objetivo público no puede
+redirigir a redes internas salvo con `--allow-private`; límite de 1 MiB por respuesta. Un certificado no válido
+detiene el módulo salvo que uses `--insecure-tls`, que queda indicado en el reporte.
+
+**Herramientas opcionales**: `--doctor` muestra en `integrations` si Nmap, Subfinder, Amass, dnsx, httpx, WhatWeb,
+ZAP, Nuclei, Playwright, SSLyze, testssl.sh, Semgrep, Bandit, pip-audit, Trivy y Gitleaks están instaladas, su versión,
+si es compatible y cómo instalarlas. En esta fase solo se detectan; DomainInfo funciona igual sin ellas y nunca
+descarga ni ejecuta binarios por su cuenta.
 
 ### Novedades de la versión 5
 
@@ -154,7 +202,7 @@ python3 domaininfo.py --help
 
 En Windows sustituye `python3` por `python` o `py -3`.
 
-`-t` limita conexiones TCP y consultas paralelas a 1–64 trabajadores. Los módulos de correo, subdominios, historia y dominios parecidos solo aplican a dominios: con una IP aparecen como omitidos. `--timeout` limita cada operación de conexión/lectura, entre 0.1 y 60 segundos; la resolución DNS del sistema y las redirecciones no tienen un límite global. `-s` puede repetirse. `--scheme http --web-port 8080` permite inspeccionar un servidor local. Una URL se normaliza a su host; configura protocolo y puerto con estas opciones, ya que la ruta y puerto de la URL no se conservan.
+`-t` limita conexiones TCP y consultas paralelas a 1–64 trabajadores. Los módulos de correo, subdominios, historia y dominios parecidos solo aplican a dominios: con una IP aparecen como omitidos. `--timeout` limita cada operación de conexión/lectura, entre 0.1 y 60 segundos; la resolución DNS del sistema y las redirecciones no tienen un límite global. `-s` puede repetirse. `--scheme http --web-port 8080` permite inspeccionar un servidor local. En los modos clásicos una URL se normaliza a su host; configura protocolo y puerto con estas opciones. Para auditar una ruta concreta (por ejemplo `/login`) usa `-m webapp`, que conserva la URL completa.
 
 ## Uso en la terminal
 
@@ -221,6 +269,8 @@ Disponible en el menú nuevo, opción **5**; en el menú Bash clásico (`--legac
 - RDAP envía el objetivo a `rdap.org` y al registro al que redirige. Requiere Internet y puede fallar por límites del servicio. Usa `-s rdap` para omitirlo.
 - HTTP/TLS verifica certificados con el almacén de confianza de Python, siguiendo las [recomendaciones oficiales de Python](https://docs.python.org/3/library/ssl.html#ssl.create_default_context). No omite errores de confianza automáticamente.
 - Un header ausente o un puerto abierto es una observación; no confirma por sí solo una vulnerabilidad ni un CVE.
+- `webapp` es pasivo: no ejecuta JavaScript (no ve formularios creados dinámicamente), no envía formularios y no
+  comprueba en el servidor la protección CSRF; por eso un formulario sin token queda como *pendiente de verificar*.
 - Traceroute usa `tracert` en Windows o `traceroute`/`tracepath` en Unix. Android puede limitarlo; se informa su ausencia y no se inventan saltos con conexiones TCP.
 
 ## Módulos Bash clásicos
@@ -242,6 +292,8 @@ Se mantienen DNS extendido, geolocalización, WHOIS, subdominios, blacklists, st
 
 ```bash
 python3 -m unittest discover -s tests -v
+# Opcional (desarrollo): pruebas de propiedades y análisis estático
+pip install hypothesis ruff bandit pyright
 ```
 
 Las pruebas usan servicios locales y mocks para RDAP/TLS, sin auditar dominios ajenos. GitHub Actions ejecuta la suite con Python 3.10, 3.12 y 3.14 en Ubuntu, macOS y Windows. Termux requiere verificación manual en un dispositivo Android; los runners de GitHub no lo reproducen. Detalles de errores corregidos: [docs/FIXES.md](docs/FIXES.md).

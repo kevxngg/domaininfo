@@ -4,6 +4,7 @@ permissions:
   contents: read
 jobs:
   python:
+    # Núcleo sin dependencias: las pruebas corren con Python estándar en los tres sistemas.
     strategy:
       fail-fast: false
       matrix:
@@ -20,6 +21,28 @@ jobs:
       - name: Windows launcher
         if: runner.os == 'Windows'
         run: .\domaininfo.cmd --doctor
+  quality:
+    # Herramientas de desarrollo (no forman parte del núcleo). Sin red hacia objetivos reales:
+    # las pruebas usan servidores locales.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install hypothesis ruff bandit pyright
+      - name: Pruebas con propiedades (Hypothesis)
+        run: python -m unittest discover -s tests
+      - name: Ruff
+        run: |
+          ruff check --select E9,F .
+          ruff check --select E9,F,B,S --ignore S101 safety.py evidence.py webapp.py tools.py
+      - name: Bandit
+        run: |
+          bandit -q -ll safety.py evidence.py webapp.py tools.py
+          bandit -q -lll -c pyproject.toml -r .
+      - name: Pyright (módulos 6.0)
+        run: pyright --pythonversion 3.10 safety.py evidence.py webapp.py tools.py
   bash:
     runs-on: ubuntu-latest
     steps:

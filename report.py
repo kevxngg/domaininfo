@@ -244,7 +244,7 @@ def generate_html(log_path: str, output_path: str) -> None:
 def main() -> None:
     if len(sys.argv) < 2:
         print(f"Uso: python3 {sys.argv[0]} <log_file.txt> [output.html]")
-        print(f"Ejemplo: python3 report.py logs/domaininfo_google.com_20260411.txt")
+        print("Ejemplo: python3 report.py logs/domaininfo_google.com_20260411.txt")
         sys.exit(1)
 
     log_path = sys.argv[1]

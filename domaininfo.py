@@ -23,11 +23,11 @@ import time
 from urllib import error, parse, request
 import uuid
 
-VERSION = "5.0.0"
+VERSION = "6.0.0a1"
 REPO = "kevxngg/domaininfo"
 CERT_WARN_DAYS = 30
 MODULES = ("dns", "rdap", "asn", "http", "tls", "tech", "mail", "subdomains", "history",
-           "ports", "traceroute", "lookalike", "mikrotik")
+           "ports", "traceroute", "lookalike", "mikrotik", "webapp")
 MODES = {
     "quick": ("dns", "rdap"),
     "web": ("dns", "http", "tls", "tech"),
@@ -37,9 +37,12 @@ MODES = {
     "mail": ("dns", "mail"),
     "recon": ("dns", "rdap", "asn", "tech", "subdomains", "history"),
     "brand": ("dns", "lookalike"),
+    "webapp": ("webapp",),
 }
 # Modos y módulos que solo tienen sentido con un dominio (no con una IP)
 DOMAIN_ONLY = {"mail", "subdomains", "history", "lookalike"}
+# Modos cuyo objetivo es una URL completa (protocolo, host, puerto, ruta y consulta)
+URL_MODES = {"webapp"}
 
 
 class NotApplicable(Exception):
@@ -81,6 +84,14 @@ def normalize_target(value):
     if re.fullmatch(r"[0-9.]+", host):
         raise ValueError("Dirección IPv4 inválida")
     return host
+
+
+def normalize_for_mode(value, mode):
+    """En los modos de URL conserva la URL completa; en el resto, como siempre, solo el host."""
+    if mode in URL_MODES:
+        import safety
+        return safety.normalize_url(value)
+    return normalize_target(value)
 
 
 def resolve(target):
@@ -299,10 +310,16 @@ def mikrotik_info(target, args):
     return routeros.audit(target, args, ports_info)
 
 
+def webapp_info(target, args):
+    """Seguridad web pasiva de una URL completa (sin enviar formularios ni credenciales)."""
+    import webapp
+    return webapp.audit(target if "://" in target else web_url(target, args), args)
+
+
 RUNNERS = {"dns": dns_info, "rdap": rdap_info, "asn": asn_info, "http": http_info,
            "tls": tls_info, "tech": tech_info, "mail": mail_info, "subdomains": subdomains_info,
            "history": history_info, "ports": ports_info, "traceroute": trace_info,
-           "lookalike": lookalike_info, "mikrotik": mikrotik_info}
+           "lookalike": lookalike_info, "mikrotik": mikrotik_info, "webapp": webapp_info}
 
 
 def scan(target, args, on_progress=None):
@@ -333,6 +350,10 @@ def scan(target, args, on_progress=None):
     assessment = score.assess(report)
     if assessment:
         report["score"] = assessment
+    import evidence
+    detail = evidence.assess(report)
+    if detail:
+        report["assessment"] = detail
     return report
 
 
@@ -413,10 +434,28 @@ def port_list(value):
 
 
 def doctor():
+    import tools
     return {"python": platform.python_version(), "platform": platform.platform(),
             "openssl": ssl.OPENSSL_VERSION, "core": "stdlib; sin root ni pip",
             "optional": {name: shutil.which(name) for name in
-                         ("traceroute", "tracepath", "tracert", "bash", "nmap", "dig", "whois")}}
+                         ("traceroute", "tracepath", "tracert", "bash", "nmap", "dig", "whois")},
+            "integrations": tools.detect_all()}
+
+
+def host_list(value):
+    """--scope: hosts separados por comas; admite *.dominio."""
+    import safety
+    hosts = []
+    for item in value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            wildcard = item.startswith("*.")
+            hosts.append(("*." if wildcard else "") + safety.normalize_host(item[2:] if wildcard else item))
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(f"Host inválido en --scope: {item}") from exc
+    return hosts
 
 
 EXAMPLES = """\
@@ -430,6 +469,10 @@ ejemplos:
   domaininfo -m mikrotik 192.168.88.1
   domaininfo -m mikrotik --offline --routeros-version 7.24.2
   domaininfo -m web --watch 300 example.com     vigilar y avisar de cambios
+  domaininfo -m webapp --url https://example.com/login
+                                                seguridad web pasiva de una URL concreta
+  domaininfo -m webapp --url https://app.example.com/ --scope auth.example.com
+                                                permite seguir redirecciones a otro host autorizado
   domaininfo example.com --json --pretty        JSON con sangría
   domaininfo example.com | jq .                 en una tubería sale JSON automáticamente
 
@@ -465,7 +508,10 @@ def parser():
     audit = cli.add_argument_group("auditoría")
     audit.add_argument("-m", "--mode", choices=MODES, default="quick",
                        help="quick: DNS y registro · web: HTTP, cabeceras y TLS · ports: puertos TCP · "
-                            "full: todo · mikrotik: RouterOS (por defecto: %(default)s)")
+                            "full: todo · mikrotik: RouterOS · webapp: una URL concreta "
+                            "(por defecto: %(default)s)")
+    audit.add_argument("--url", metavar="URL",
+                       help="webapp: URL completa a auditar; se conservan puerto, ruta y parámetros")
     audit.add_argument("-f", "--file", type=Path, metavar="ARCHIVO",
                        help="archivo UTF-8 con un objetivo por línea (# para comentarios)")
     audit.add_argument("-s", "--skip", choices=MODULES, action="append", default=[], metavar="MÓDULO",
@@ -490,6 +536,14 @@ def parser():
                          help="protocolo para el modo web (por defecto: %(default)s)")
     network.add_argument("--web-port", type=bounded_int(1, 65535), metavar="PUERTO",
                          help="puerto del servidor web (por defecto 443 o 80)")
+
+    scope = cli.add_argument_group("alcance y seguridad (webapp)")
+    scope.add_argument("--scope", type=host_list, action="extend", default=[], metavar="HOSTS",
+                       help="hosts adicionales autorizados para seguir redirecciones, p. ej. auth.example.com,*.cdn.example.com")
+    scope.add_argument("--allow-private", action="store_true",
+                       help="permite que un objetivo público redirija o resuelva a redes internas (solo si está autorizado)")
+    scope.add_argument("--insecure-tls", action="store_true",
+                       help="lee la página aunque su certificado no sea válido (queda indicado en el reporte)")
 
     router = cli.add_argument_group("mikrotik")
     router.add_argument("--routeros-version", metavar="VERSIÓN",
@@ -583,6 +637,10 @@ def fingerprint(report):
             facts["tech.list"] = ", ".join(t["name"] for t in data.get("technologies", []))
         elif name == "lookalike":
             facts["lookalike.registered"] = ", ".join(r["domain"] for r in data.get("registered", []))
+        elif name == "webapp":
+            facts["webapp.status"] = data.get("status")
+            facts["webapp.findings"] = ", ".join(sorted({f["title"] for f in data.get("findings", [])
+                                                         if f.get("status") in ("confirmado", "probable")}))
     if isinstance(report.get("score"), dict):
         facts["score.grade"] = report["score"].get("grade")
     return facts
@@ -595,7 +653,8 @@ FACT_LABELS = {"dns.addresses": "Direcciones", "http.status": "Estado HTTP",
                "mail.grade": "Nota del correo", "mail.dmarc": "Política DMARC",
                "subdomains.alive": "Subdominios activos", "subdomains.takeover": "Subdominios con posible toma",
                "tech.list": "Tecnologías", "lookalike.registered": "Dominios parecidos registrados",
-               "score.grade": "Nota de seguridad"}
+               "score.grade": "Nota de seguridad", "webapp.status": "Estado HTTP de la URL",
+               "webapp.findings": "Hallazgos web confirmados o probables"}
 
 
 def describe_changes(before, after):
@@ -717,6 +776,12 @@ def main(argv=None):
                 args.routeros_version = routeros.parse_version(args.routeros_version).text
             except ValueError as exc:
                 cli.error(str(exc))
+    if args.url:
+        if args.mode not in URL_MODES:
+            cli.error("--url requiere -m webapp")
+        if args.target or args.file:
+            cli.error("Usa --url, un objetivo o --file, no varios a la vez")
+        args.target = args.url
     if args.target and args.file:
         cli.error("Usa un objetivo o --file, no ambos")
     if args.interactive and (args.target or args.file or args.offline):
@@ -742,7 +807,7 @@ def main(argv=None):
         if not raw.strip() or raw.lstrip().startswith("#"):
             continue
         try:
-            target = normalize_target(raw)
+            target = normalize_for_mode(raw, args.mode)
             if target not in targets:
                 targets.append(target)
         except (ValueError, UnicodeError) as exc:

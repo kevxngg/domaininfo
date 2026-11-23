@@ -28,16 +28,23 @@ MODE_LABELS = {
     "recon": ("Reconocimiento OSINT", "Subdominios, red (ASN), tecnologías e historia del dominio"),
     "brand": ("Marca y phishing", "Dominios parecidos registrados que podrían imitar el tuyo"),
     "mikrotik": ("MikroTik / RouterOS", "Versión, servicios de gestión y avisos aplicables"),
+    "webapp": ("Seguridad de aplicación web", "Una URL concreta: formularios, CSRF, cookies, CSP, CORS y errores"),
 }
 MODE_KEYS = {"1": "quick", "2": "web", "3": "ports", "4": "full", "5": "mikrotik",
-             "e": "mail", "s": "recon", "p": "brand"}
+             "e": "mail", "s": "recon", "p": "brand", "w": "webapp"}
+STATUS_LABELS = {"confirmado": "CONFIRMADO", "probable": "PROBABLE", "informativo": "INFO",
+                 "pendiente": "PENDIENTE DE VERIFICAR", "no_aplicable": "NO APLICA",
+                 "no_evaluado": "NO EVALUADO", "error": "ERROR"}
+CSRF_LABELS = {"token_visible": "token visible", "token_en_meta": "token en <meta> (revisar envío)",
+               "proteccion_alternativa": "sin token; cookies SameSite", "desconocido": "sin protección visible "
+               "(pendiente de verificar)", "no_aplicable": "no aplica (GET)"}
 MODULE_LABELS = {"dns": "Resolución de direcciones", "rdap": "Registro RDAP",
                  "http": "Sitio y cabeceras HTTP", "tls": "Certificado TLS",
                  "ports": "Servicios TCP", "traceroute": "Ruta de red",
                  "mikrotik": "Auditoría RouterOS", "asn": "Red y operador (ASN)",
                  "mail": "Seguridad del correo", "tech": "Tecnologías y cabeceras",
                  "subdomains": "Subdominios", "history": "Historia del dominio",
-                 "lookalike": "Dominios parecidos"}
+                 "lookalike": "Dominios parecidos", "webapp": "Seguridad de la aplicación web"}
 MODULE_HELP = {
     "dns": "Direcciones IPv4/IPv6 que el sistema devuelve para el objetivo.",
     "rdap": "Datos públicos del registro del dominio o del bloque de direcciones IP.",
@@ -52,6 +59,8 @@ MODULE_HELP = {
     "subdomains": "Subdominios publicados en registros de certificados y subdominios que podrían ser tomados.",
     "history": "Antigüedad y caducidad del registro, registrador y capturas en la Wayback Machine.",
     "lookalike": "Variantes del nombre (errores de tecleo, homoglifos, otros TLD) que están registradas.",
+    "webapp": "Análisis pasivo de la URL pedida (solo GET): formularios, CSRF, cookies, cabeceras, CORS, "
+              "errores técnicos y datos expuestos, comparado con la raíz del sitio.",
 }
 SEVERITY_COLORS = {"alta": "1;31", "media": "33", "baja": "36", "info": "90"}
 SEVERITY_LABELS = {"alta": "ALTA", "media": "MEDIA", "baja": "BAJA", "info": "INFO"}
@@ -198,7 +207,8 @@ class InteractiveApp:
                   {"quick": "DNS + registro del dominio", "web": "HTTP + cabeceras + TLS",
                    "ports": "Servicios TCP accesibles", "full": "Todos los módulos generales",
                    "mikrotik": "Router en red o versión offline", "mail": "¿Se puede suplantar el correo?",
-                   "recon": "Subdominios, red y tecnologías", "brand": "Dominios que imitan el tuyo"}[mode])
+                   "recon": "Subdominios, red y tecnologías", "brand": "Dominios que imitan el tuyo",
+                   "webapp": "URL completa: login, cookies, CSP"}[mode])
                  for key, mode in MODE_KEYS.items()]
         workspace = [("6", "Varios objetivos", "Auditoría desde un archivo"),
                      ("7", "Mis reportes", "Resultados y exportaciones"),
@@ -399,6 +409,13 @@ class InteractiveApp:
                 return 0
 
     def target(self, args):
+        if args.mode in self.core.URL_MODES:
+            self.line("URL completa con ruta. Ejemplo: https://example.com/login")
+            self.line("Solo se hacen peticiones GET: no se envían formularios ni credenciales.", "90")
+            raw = self.ask("URL (0 para volver)", self.last_target or None,
+                           validator=lambda value: (value, self.core.normalize_for_mode(value, args.mode)))
+            self.last_target = raw[1]
+            return raw[1]
         self.line("Acepta dominio, IPv4, IPv6 o URL. Ejemplo: 192.168.88.1")
         raw = self.ask("Objetivo (0 para volver)", self.last_target or None,
                        validator=lambda value: (value, self.core.normalize_target(value)))
@@ -461,24 +478,29 @@ class InteractiveApp:
             targets = [self.target(args)]
         self.review(Plan(args, targets))
 
-    def load_batch(self):
+    def read_targets(self, path, mode=None):
+        """Objetivos válidos y sin duplicados de un archivo; en webapp se conservan las URL completas."""
+        lines = path.read_text(encoding="utf-8-sig").splitlines()
+        targets, ignored = [], 0
+        for line in lines:
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            try:
+                normalized = self.core.normalize_for_mode(line, mode or "quick")
+                if normalized in targets:
+                    ignored += 1
+                else:
+                    targets.append(normalized)
+            except (ValueError, UnicodeError):
+                ignored += 1
+        if not targets:
+            raise ValueError("El archivo no contiene objetivos válidos.")
+        return targets, ignored
+
+    def load_batch(self, mode=None):
         def validate(value):
             path = Path(value.strip('"')).expanduser()
-            lines = path.read_text(encoding="utf-8-sig").splitlines()
-            targets, ignored = [], 0
-            for line in lines:
-                if not line.strip() or line.lstrip().startswith("#"):
-                    continue
-                try:
-                    normalized = self.core.normalize_target(line)
-                    if normalized in targets:
-                        ignored += 1
-                    else:
-                        targets.append(normalized)
-                except (ValueError, UnicodeError):
-                    ignored += 1
-            if not targets:
-                raise ValueError("El archivo no contiene objetivos válidos.")
+            targets, ignored = self.read_targets(path, mode)
             return path, targets, ignored
         self.line("Archivo UTF-8 con un objetivo por línea; se omiten comentarios y duplicados.")
         return self.ask("Ruta del archivo (0 para volver)", validator=validate)
@@ -490,6 +512,13 @@ class InteractiveApp:
         for key, mode in MODE_KEYS.items():
             self.item(key, *MODE_LABELS[mode])
         mode = MODE_KEYS[self.choose(MODE_KEYS, "Tipo de auditoría", "1")]
+        if mode in self.core.URL_MODES:
+            try:
+                targets, ignored = self.read_targets(path, mode)
+            except (OSError, ValueError, UnicodeError) as exc:
+                self.line(f"No se puede usar este archivo en {MODE_LABELS[mode][0]}: {exc}", "33")
+                self.pause()
+                return
         args = self.fresh_args(mode)
         args.file = path
         if mode == "mikrotik":
@@ -517,6 +546,11 @@ class InteractiveApp:
                 self.line(f"Web: {args.scheme.upper()} · puerto {args.web_port or 'predeterminado'}")
             if args.mode in ("ports", "full", "mikrotik") and not args.offline:
                 self.line("Puertos TCP: " + (", ".join(map(str, args.ports)) if args.ports else "lista recomendada del modo"))
+            if args.mode in self.core.URL_MODES:
+                extra = getattr(args, "scope", None) or []
+                self.line("Alcance: el host de la URL" + (" + " + ", ".join(extra) if extra else "")
+                          + "; redirecciones fuera de él no se siguen")
+                self.line("Solo peticiones GET: no se envían formularios ni credenciales.", "90")
             active = [MODULE_LABELS[name] for name in self.core.MODES[args.mode] if name not in args.skip]
             self.line("Módulos: " + (", ".join(active) or "ninguno seleccionado"))
             if "rdap" in self.core.MODES[args.mode] and "rdap" not in args.skip:
@@ -543,7 +577,7 @@ class InteractiveApp:
                     if args.offline:
                         args.routeros_version = self.version(True, args.routeros_version)
                     elif plan.batch:
-                        args.file, plan.targets, plan.ignored = self.load_batch()
+                        args.file, plan.targets, plan.ignored = self.load_batch(args.mode)
                     else:
                         plan.targets = [self.target(args)]
                 except Back:
@@ -823,6 +857,50 @@ class InteractiveApp:
             for row in rows[:6]:
                 self.line(f"  {row['domain']} ({row.get('kind')})" + (" · recibe correo" if row.get("mx") else ""),
                           "33" if row.get("mx") else "90")
+        elif name == "webapp":
+            self.webapp_summary(data)
+
+    def webapp_summary(self, data):
+        status = data.get("status")
+        self.line(f"URL: {data.get('final_url')} · HTTP {status} · {data.get('title') or 'sin título'}",
+                  "32" if str(status).startswith("2") else "33")
+        root = data.get("root_comparison") or {}
+        if root.get("same_as_target"):
+            self.line("Raíz del sitio: es la misma URL auditada", "90")
+        elif root.get("error"):
+            self.line(f"Raíz del sitio: no comparada ({root['error']})", "90")
+        elif root:
+            self.line(f"Raíz del sitio: HTTP {root.get('status')} · {root.get('title') or 'sin título'} · "
+                      + ("contenido distinto al de la URL pedida" if root.get("differs")
+                         else "MISMO contenido que la URL pedida (revisa si la ruta existe)"),
+                      "90" if root.get("differs") else "33")
+        for hop in data.get("redirects", []):
+            self.line(f"Redirección {hop.get('status')} → {hop.get('location')}"
+                      + (f" · NO SEGUIDA: {hop['blocked']}" if hop.get("blocked") else ""),
+                      "33" if hop.get("blocked") or hop.get("downgrade") else "90")
+        score = data.get("assessment") or {}
+        if score:
+            self.line(f"Seguridad {score.get('security')}/100 · cobertura {score.get('coverage')}% · "
+                      f"confianza {score.get('confidence')}%")
+        for form in data.get("forms", [])[:6]:
+            kind = "login" if form.get("login") else "formulario"
+            fields = ", ".join(form.get("user_fields", []) + form.get("password_fields", []))
+            self.line(f"Formulario {form['index']} ({kind}): {form['method']} → {form['action']}"
+                      + (f" · campos {fields}" if fields else "")
+                      + f" · CSRF: {CSRF_LABELS.get(form['csrf']['state'], form['csrf']['state'])}")
+        cookies = data.get("cookies", [])
+        if cookies:
+            self.line("Cookies: " + ", ".join(
+                f"{c['name']} [{'S' if c['secure'] else '-'}{'H' if c['httponly'] else '-'} "
+                f"{c['samesite'] or 'sin SameSite'}]" for c in cookies[:6]) + "  (S=Secure, H=HttpOnly)", "90")
+        relevant = [f for f in data.get("findings", []) if f.get("status") in ("confirmado", "probable", "pendiente")]
+        for item in relevant[:10]:
+            self.line(f"[{SEVERITY_LABELS[item['severity']]}·{STATUS_LABELS[item['status']]}] {item['title']}",
+                      SEVERITY_COLORS[item["severity"]] if item["status"] != "pendiente" else "33")
+        if len(relevant) > 10:
+            self.line(f"… y {len(relevant) - 10} más en el reporte", "90")
+        if not relevant:
+            self.line("Sin hallazgos confirmados ni pendientes en las comprobaciones pasivas.", "32")
 
     def tls_summary(self, data):
         if data.get("verified") is False:

@@ -100,7 +100,13 @@ def assess(report):
     if look and look.get("with_mail"):
         add("media", "Marca", f"{look['with_mail']} dominios parecidos registrados pueden recibir correo",
             "Vigila esos dominios y valora registrarlos o denunciarlos")
-    if not findings and not any(_data(report, n) for n in ("tls", "tech", "http", "mail", "dns", "ports")):
+    webapp = _data(report, "webapp")
+    for item in (webapp or {}).get("findings", []):
+        # Solo lo que tiene evidencia: lo 'pendiente' o 'informativo' no resta en la nota clásica.
+        if item.get("status") in ("confirmado", "probable") and item.get("severity") in PENALTY:
+            findings.append({"severity": item["severity"], "area": "Web app", "title": item["title"],
+                             "fix": item.get("recommendation", ""), "source": "webapp"})
+    if not findings and not any(_data(report, n) for n in ("tls", "tech", "http", "mail", "dns", "ports", "webapp")):
         return None
     points = max(0, 100 - sum(PENALTY[f["severity"]] for f in findings))
     letter = "A" if points >= 90 else "B" if points >= 80 else "C" if points >= 65 else "D" if points >= 50 else "F"
