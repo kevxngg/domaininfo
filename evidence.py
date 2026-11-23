@@ -37,7 +37,9 @@ _PATTERNS = (
     # La búsqueda anticipada (acotada a 64) exige un nombre sensible: una clave como "http" no llega a
     # consumir la URL que sigue, y todo sigue siendo de tiempo lineal.
     (re.compile(r"(?i)(?<![\w.-])(?=[\w.-]{0,64}?" + _SECRET_WORDS + r")([\w.-]{1,64})"
-                r"([\"']?[ \t]{0,3}[=:][ \t]{0,3}[\"']?)([^\s;,\"'&<>]{4,256})"),
+                # El valor se consume entero (sin límite): ninguna cola larga queda visible. Sigue siendo
+                # lineal porque el nombre está acotado y la entrada se recorta a REDACT_INPUT_LIMIT.
+                r"([\"']?[ \t]*[=:][ \t]*[\"']?)([^\s;,\"'&<>]{4,})"),
      lambda m: m.group(1) + m.group(2) + mask(m.group(3))),
 )
 REDACT_INPUT_LIMIT = 4000

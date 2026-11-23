@@ -197,6 +197,13 @@ class EvidenceTests(unittest.TestCase):
         self.assertIn("sessionid=", text)
         self.assertEqual(evidence.mask("abcdef123456"), "abcd…[oculto]")
 
+    def test_redact_long_values_and_spacing(self):
+        tail = "TAILSECRET" * 40  # más de 256 caracteres
+        text = evidence.redact("sessionid=" + "A" * 260 + tail, limit=5000)
+        self.assertNotIn("TAILSECRET", text)
+        self.assertNotIn("SPACEDSECRET99", evidence.redact("token      =      SPACEDSECRET99"))
+        self.assertIn("Path=/", evidence.redact("sid=abcdefghijkl; Path=/"))
+
     def test_finding_validation_and_id(self):
         item = evidence.Finding(target="https://a.example/login", path="/login", category="cookies",
                                 title="Cookie sin Secure", severity="media", status="confirmado",
