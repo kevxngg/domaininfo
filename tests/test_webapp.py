@@ -490,6 +490,43 @@ class HostileServerTests(unittest.TestCase):
             safety.http_get(self.local.base + "/", safety.ScopePolicy(self.local.base + "/"), timeout=2,
                             deadline=0)
 
+    def test_redact_linear_time(self):
+        import time
+        start = time.monotonic()
+        evidence.redact("a." * 10000 + "x" * 5000)
+        self.assertLess(time.monotonic() - start, 1)
+
+    def test_deadline_applies_to_slow_headers(self):
+        import socket as sk
+        import time
+        server = sk.socket()
+        server.bind(("127.0.0.1", 0))
+        server.listen()
+        stop = threading.Event()
+
+        def drip():
+            conn, _ = server.accept()
+            with conn:
+                conn.recv(4096)
+                conn.sendall(b"HTTP/1.0 200 OK\r\n")
+                while not stop.is_set():
+                    try:
+                        conn.sendall(b"X")  # una cabecera interminable, byte a byte
+                    except OSError:
+                        return
+                    time.sleep(0.2)
+        thread = threading.Thread(target=drip, daemon=True)
+        thread.start()
+        url = f"http://127.0.0.1:{server.getsockname()[1]}/"
+        start = time.monotonic()
+        try:
+            with self.assertRaises(OSError):
+                safety.http_get(url, safety.ScopePolicy(url), timeout=1, deadline=time.monotonic() + 1.5)
+            self.assertLess(time.monotonic() - start, 4)
+        finally:
+            stop.set()
+            server.close()
+
     def test_embedded_ipv4_classification(self):
         self.assertEqual(safety.classify_ip("64:ff9b::a9fe:a9fe"), "blocked")
         self.assertEqual(safety.classify_ip("2002:a9fe:a9fe::"), "blocked")

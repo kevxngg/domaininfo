@@ -21,8 +21,9 @@ STATUS_LABELS = {"confirmado": "Confirmado", "probable": "Probable", "informativ
                  "no_evaluado": "No evaluado", "error": "Error de comprobación"}
 
 # Patrón de nombres de parámetros que suelen llevar secretos (se usa para ocultarlos, no es un secreto)
-_SECRET_NAME = (r"[\w.-]*(?:sess|sid|token|csrf|xsrf|auth|jwt|secret|passw|pwd|apikey|api_key|cookie|key|code|"  # noqa: S105
-                r"sig|signature|ticket|nonce)[\w.-]*")
+_SECRET_WORDS = (r"(?:sess|sid|token|csrf|xsrf|auth|jwt|secret|passw|pwd|apikey|api_key|cookie|key|"  # noqa: S105
+                 r"code|sig|signature|ticket|nonce)")
+_SECRET_NAME = r"[\w.-]{0,64}" + _SECRET_WORDS + r"[\w.-]{0,64}"
 _SECRET_PARAM = re.compile(r"(?i)" + _SECRET_NAME)
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 _PATTERNS = (
@@ -32,9 +33,14 @@ _PATTERNS = (
     (re.compile(r"\beyJ[\w-]{5,}\.eyJ[\w-]{5,}\.[\w-]{5,}"), lambda m: mask(m.group(0))),
     (re.compile(r"\b(gh[pousr]_[A-Za-z0-9]{30,}|xox[abprs]-[\w-]{10,}|AIza[\w-]{35})"), lambda m: mask(m.group(0))),
     (re.compile(r"(?i)\b(bearer|basic)\s+[\w.~+/=-]{8,}"), lambda m: m.group(1) + " [oculto]"),
-    (re.compile(r"(?i)\b(" + _SECRET_NAME + r")([\"']?\s*[=:]\s*[\"']?)([^\s;,\"'&<>]{4,})"),
+    # Nombre acotado (sin cuantificadores anidados: tiempo lineal); la lista de nombres se comprueba aparte
+    # La búsqueda anticipada (acotada a 64) exige un nombre sensible: una clave como "http" no llega a
+    # consumir la URL que sigue, y todo sigue siendo de tiempo lineal.
+    (re.compile(r"(?i)(?<![\w.-])(?=[\w.-]{0,64}?" + _SECRET_WORDS + r")([\w.-]{1,64})"
+                r"([\"']?[ \t]{0,3}[=:][ \t]{0,3}[\"']?)([^\s;,\"'&<>]{4,256})"),
      lambda m: m.group(1) + m.group(2) + mask(m.group(3))),
 )
+REDACT_INPUT_LIMIT = 4000
 
 
 def mask(value):
@@ -45,7 +51,7 @@ def mask(value):
 
 def redact(text, limit=300):
     """Quita secretos reconocibles (cookies, tokens, claves) y recorta la evidencia."""
-    text = str(text or "")[:20000]
+    text = str(text or "")[:REDACT_INPUT_LIMIT]
     for pattern, replace in _PATTERNS:
         text = pattern.sub(replace, text)
     text = clean(re.sub(r"\s+", " ", text)).strip()

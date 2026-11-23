@@ -17,6 +17,7 @@ import ipaddress
 import re
 import socket
 import ssl
+import threading
 import time
 from urllib import parse
 
@@ -180,7 +181,7 @@ class _PinnedHTTP(http.client.HTTPConnection):
         self._address = address
 
     def connect(self):
-        self.sock = socket.create_connection((self._address, self.port), self.timeout)
+        self.sock = self._raw_sock = socket.create_connection((self._address, self.port), self.timeout)
 
 
 class _PinnedHTTPS(http.client.HTTPSConnection):
@@ -193,7 +194,8 @@ class _PinnedHTTPS(http.client.HTTPSConnection):
     def connect(self):
         sock = socket.create_connection((self._address, self.port), self.timeout)
         server_name = None if _is_ip(self._sni) else self._sni
-        self.sock = self._tls.wrap_socket(sock, server_hostname=server_name)
+        self._raw_sock = sock
+        self.sock = self._raw_sock = self._tls.wrap_socket(sock, server_hostname=server_name)
 
 
 def _is_ip(value):
@@ -275,22 +277,41 @@ def _request_once(url, policy, timeout, limit, extra_headers, insecure_tls=False
             connection = _PinnedHTTPS(host, port, address, timeout, context)
         else:
             connection = _PinnedHTTP(host, port, address, timeout)
+        # Vigilante: al vencer el plazo total corta el socket, también durante el TLS y las cabeceras,
+        # que http.client lee sin dar ocasión de comprobar el plazo.
+        watchdog = threading.Timer(_remaining(deadline), _abort, (connection,))
+        watchdog.daemon = True
+        watchdog.start()
         try:
             connection.request("GET", target, headers=headers)
-            if connection.sock is not None:  # getresponse() puede soltar el socket: se ajusta antes
-                connection.sock.settimeout(min(timeout, _remaining(deadline)))
             response = connection.getresponse()
             body = _read_body(response, limit, deadline)
             verified = verify
             return response.status, list(response.getheaders()), body, address, verified
-        except ssl.SSLCertVerificationError as exc:
+        except ssl.SSLCertVerificationError as exc:  # antes que OSError, del que es subclase
             if verify is True and len(attempts) > 1:
                 continue
             raise OSError(f"Certificado TLS no válido ({exc.verify_message}); "
                           "usa --insecure-tls solo si el sitio está autorizado y confías en la red") from exc
+        except (OSError, http.client.HTTPException) as exc:
+            if time.monotonic() >= deadline:
+                raise OSError("Tiempo total de la auditoría agotado") from exc
+            raise
         finally:
+            watchdog.cancel()
             connection.close()
     raise OSError("No se pudo conectar")  # pragma: no cover
+
+
+def _abort(connection):
+    """Desbloquea cualquier lectura pendiente de la conexión (llamado desde el temporizador)."""
+    # _raw_sock sigue siendo válido aunque http.client haya soltado connection.sock tras getresponse()
+    sock = getattr(connection, "_raw_sock", None) or getattr(connection, "sock", None)
+    if sock is not None:
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
 
 
 def http_get(url, policy, timeout, limit=MAX_BODY, headers=None, max_redirects=MAX_REDIRECTS,
