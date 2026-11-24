@@ -34,9 +34,15 @@ MODE_LABELS = {
     "brand": ("Brand and phishing", "Registered lookalike domains that could imitate yours"),
     "mikrotik": ("MikroTik / RouterOS", "Version, management services and applicable advisories"),
     "webapp": ("Web application security", "One specific URL: forms, CSRF, cookies, CSP, CORS and errors"),
+    "session": ("Authenticated sessions", "Login, cookies, logout, roles and lockout with authorized test accounts"),
+    "apispec": ("Documented API", "OpenAPI/Swagger: endpoints, security schemes and risky parameters"),
+    "zap": ("OWASP ZAP (passive)", "Passive alerts from the ZAP you run on this computer"),
+    "browser": ("Page with JavaScript", "Render in headless Chromium: dynamic forms, JS cookies, mixed content"),
+    "code": ("Project code", "Semgrep, Bandit, pip-audit, Trivy and Gitleaks on a local folder"),
 }
 MODE_KEYS = {"1": "quick", "2": "web", "3": "ports", "4": "full", "5": "mikrotik",
-             "e": "mail", "s": "recon", "p": "brand", "w": "webapp"}
+             "e": "mail", "s": "recon", "p": "brand", "w": "webapp", "u": "session", "i": "apispec",
+             "z": "zap", "b": "browser", "c": "code"}
 STATUS_LABELS = {"confirmed": "CONFIRMED", "likely": "LIKELY", "informational": "INFO",
                  "pending": "PENDING VERIFICATION", "not_applicable": "NOT APPLICABLE",
                  "not_evaluated": "NOT EVALUATED", "error": "ERROR"}
@@ -49,7 +55,9 @@ MODULE_LABELS = {"dns": "Address resolution", "rdap": "RDAP registration",
                  "mikrotik": "RouterOS audit", "asn": "Network and operator (ASN)",
                  "mail": "Mail security", "tech": "Technologies and headers",
                  "subdomains": "Subdomains", "history": "Domain history",
-                 "lookalike": "Lookalike domains", "webapp": "Web application security"}
+                 "lookalike": "Lookalike domains", "webapp": "Web application security",
+                 "session": "Authenticated sessions", "apispec": "Documented API", "zap": "OWASP ZAP alerts",
+                 "browser": "Page with JavaScript", "tools": "External tools", "intel": "Known vulnerabilities"}
 MODULE_HELP = {
     "dns": "IPv4/IPv6 addresses the system returns for the target.",
     "rdap": "Public registration data of the domain or of the IP address block.",
@@ -66,6 +74,16 @@ MODULE_HELP = {
     "lookalike": "Name variants (typos, homoglyphs, other TLDs) that are registered.",
     "webapp": "Passive analysis of the requested URL (GET only): forms, CSRF, cookies, headers, CORS, "
               "technical errors and exposed data, compared with the site root.",
+    "session": "Login flow, session cookies, fixation, expiry, logout, role access, user enumeration and a "
+               "capped lockout check, only with the test accounts of the authorization file.",
+    "apispec": "Documented OpenAPI/Swagger operations, servers, security schemes and risky parameters; the "
+               "operations are never called.",
+    "zap": "Passive alerts that your local OWASP ZAP raised for the URL; no active scan.",
+    "browser": "The page after JavaScript runs: dynamic forms, cookies set by scripts, console errors and "
+               "mixed content.",
+    "tools": "Results of the optional external tools, normalized with their evidence and coverage.",
+    "intel": "Known vulnerabilities (OSV, NVD, CISA KEV) for the software versions found; a match by name "
+             "alone is never confirmed.",
 }
 SEVERITY_COLORS = {"high": "1;31", "medium": "33", "low": "36", "info": "90"}
 SEVERITY_LABELS = {"high": "HIGH", "medium": "MEDIUM", "low": "LOW", "info": "INFO"}
@@ -237,12 +255,16 @@ class InteractiveApp:
                       "ports": "Reachable TCP services", "full": "All general modules",
                       "mikrotik": "Router on the network or offline version", "mail": "Can the mail be spoofed?",
                       "recon": "Subdomains, network and technologies", "brand": "Domains that imitate yours",
-                      "webapp": "Full URL: login, cookies, CSP"}[mode]))
+                      "webapp": "Full URL: login, cookies, CSP", "session": "Test accounts, logout, roles",
+                      "apispec": "OpenAPI / Swagger review", "zap": "Passive alerts from your ZAP",
+                      "browser": "Render with Playwright", "code": "Static analysis of a folder"}[mode]))
                  for key, mode in MODE_KEYS.items()]
         workspace = [("6", tr("Several targets"), tr("Audit from a file")),
                      ("7", tr("My reports"), tr("Results and exports")),
                      ("8", tr("Preferences"), tr("Connections, timeouts, formats and language")),
                      ("9", tr("Computer diagnostics"), tr("Status of the tools")),
+                     ("t", tr("Optional tools"), tr("Installed tools and how to add the rest")),
+                     ("x", tr("Security Center"), tr("Local dashboard, history and PDF")),
                      ("a", tr("Classic audits"), tr("ISP / WebApp / LAN with Bash"))]
         if self.width >= 78:
             panel_width = (self.width - 6) // 2
@@ -277,7 +299,7 @@ class InteractiveApp:
             gradient = ("1;96", "1;36", "36", "1;34", "34", "36")
             for index, row in enumerate(art):
                 self.line(row.ljust(size).center(self.width - 4), gradient[index % len(gradient)])
-            self.center(tr("DOMAINS / NETWORKS / ROUTEROS"), "90")
+            self.center(tr("SECURITY SUITE · DOMAINS / WEB / NETWORKS"), "90")
             system = "TERMUX" if os.environ.get("TERMUX_VERSION") else platform.system().upper()
             self.center(f"v{self.core.VERSION}  ·  Kevin / @kevxngg" +
                         (f"  ·  {system}" if self.width >= 60 else ""), "90")
@@ -411,7 +433,7 @@ class InteractiveApp:
             try:
                 self.home()
                 try:
-                    choice = self.choose(set(MODE_KEYS) | {"6", "7", "8", "9", "a", "h"})
+                    choice = self.choose(set(MODE_KEYS) | {"6", "7", "8", "9", "a", "h", "t", "x"})
                 except Back:
                     self.line()
                     return 0
@@ -426,6 +448,10 @@ class InteractiveApp:
                         self.preferences(self.defaults)
                     elif choice == "9":
                         self.diagnostics()
+                    elif choice == "t":
+                        self.optional_tools()
+                    elif choice == "x":
+                        self.security_center()
                     elif choice == "a":
                         self.classic()
                     else:
@@ -439,6 +465,11 @@ class InteractiveApp:
                 return 0
 
     def target(self, args):
+        if args.mode in self.core.PATH_MODES:
+            self.line(tr("Folder of the project to analyze. Example: C:\\code\\my-app or ~/code/my-app"))
+            raw = self.ask(tr("Folder (0 to go back)"), None,
+                           validator=lambda value: self.core.normalize_for_mode(value, args.mode))
+            return raw
         if args.mode in self.core.URL_MODES:
             self.line(tr("Full URL with path. Example: https://example.com/login"))
             self.line(tr("Only GET requests are made: no forms or credentials are submitted."), "90")
@@ -503,6 +534,18 @@ class InteractiveApp:
                 except Back:
                     continue
                 break
+        elif mode == "session":
+            self.screen(mode_label(mode), tr("Step 1 · Choose the authorization file."))
+            self.line(tr("Only for systems you are authorized to test, with test accounts. The file lists the "
+                         "targets, the environment variables that hold the credentials and the limits "
+                         "(docs/AUTHENTICATED_AUDIT.md)."))
+
+            def load(value):
+                import authscope
+                path = Path(value.strip().strip('"')).expanduser()
+                return path, authscope.load(str(path)).login_url
+            args.auth_file, login_url = self.ask(tr("Authorization file (0 to go back)"), None, validator=load)
+            targets = [login_url]
         else:
             self.screen(mode_label(mode), tr("Step 1 · Choose the target."))
             targets = [self.target(args)]
@@ -947,6 +990,44 @@ class InteractiveApp:
                           "33" if row.get("mx") else "90")
         elif name == "webapp":
             self.webapp_summary(data)
+        elif name in ("session", "apispec", "zap", "browser", "tools", "intel"):
+            self.evidence_summary(name, data)
+
+    def evidence_summary(self, name, data):
+        """Shared summary for the modules built on the evidence model (phases 2 and 3)."""
+        if data.get("status") in ("not_evaluated", "unavailable") or data.get("available") is False:
+            self.line(tr("Not evaluated: {reason}", reason=data.get("reason") or data.get("note")
+                         or tr("optional component not available")), "90")
+            if data.get("install"):
+                self.line(tr("install: {hint}", hint=data["install"]), "90")
+        for row in data.get("results", []):  # external tools
+            state = row.get("status")
+            text = f"{row.get('tool')}: {state}"
+            if row.get("version"):
+                text += f" {row['version']}"
+            if row.get("reason"):
+                text += f" ({row['reason']})"
+            self.line(text, "32" if state == "ok" else "90")
+            if state != "ok" and row.get("install") and row.get("reason") == "unavailable":
+                self.line("    " + tr("install: {hint}", hint=row["install"]), "90")
+        if name == "intel":
+            self.line(tr("Components checked: {count} · known vulnerabilities matched: {matches}",
+                         count=len(data.get("components", [])), matches=len(data.get("matches", []))))
+        score = data.get("assessment") or {}
+        if score:
+            self.line(tr("Security {security}/100 · Coverage {coverage}% · Confidence {confidence}%",
+                         security=score.get("security"), coverage=score.get("coverage"),
+                         confidence=score.get("confidence")))
+        relevant = [f for f in data.get("findings", []) if f.get("status") in ("confirmed", "likely", "pending")]
+        for item in relevant[:10]:
+            self.line(f"[{severity_label(item['severity'])}·{status_label(item['status'])}] {item['title']}",
+                      severity_color(item["severity"]) if item["status"] != "pending" else "33")
+        if len(relevant) > 10:
+            self.line(tr("… and {count} more in the report", count=len(relevant) - 10), "90")
+        if not relevant and not data.get("results"):
+            self.line(tr("No confirmed or pending findings."), "32")
+        if data.get("note"):
+            self.line(str(data["note"]), "90")
 
     def webapp_summary(self, data):
         status = data.get("status")
@@ -1276,6 +1357,43 @@ class InteractiveApp:
         for name, path in data["optional"].items():
             self.line(f"{'[OK]' if path else '[--]'} {name}: {path or tr('not installed (optional)')}")
         self.pause()
+
+    def optional_tools(self):
+        """Installation assistant: what is installed, its version and how to add the rest (nothing is
+        downloaded or executed automatically)."""
+        import tools
+        self.screen(tr("Optional tools"), tr("DomainInfo works without them; install only what you need."))
+        for name, info in tools.detect_all().items():
+            if info.get("available"):
+                ok = info.get("compatible") is not False
+                self.line(f"[{'OK' if ok else '!!'}] {name} {info.get('version') or ''}".rstrip()
+                          + ("" if ok else " · " + tr("needs {minimum} or newer", minimum=info.get("minimum"))),
+                          "32" if ok else "33")
+            else:
+                self.line(f"[--] {name}: " + tr("install: {hint}", hint=info.get("install")), "90")
+        self.line()
+        self.line(tr("Use them with --tool NAME (probing tools also need --active and the target in --scope)."))
+        self.pause()
+
+    def security_center(self):
+        self.screen(tr("Security Center"), tr("Local dashboard with projects, history, comparisons and PDF reports."))
+        try:
+            import server
+            server.require_extra()
+        except Exception as exc:  # noqa: BLE001 - shown to the user, nothing else to do
+            self.line(str(exc), "33")
+            self.line(tr("Install the extra with: pip install \"domaininfo[server]\""), "90")
+            self.pause()
+            return
+        self.line(tr("It listens only on 127.0.0.1 and opens your browser with a private access token."))
+        self.line(tr("Press CTRL+C here to stop it and return to the menu."), "90")
+        try:
+            server.serve(host="127.0.0.1", port=8765, open_browser=True)
+        except KeyboardInterrupt:
+            pass
+        except (OSError, ValueError) as exc:
+            self.line(str(exc), "33")
+            self.pause()
 
     def classic(self):
         self.screen(tr("Classic audits"), tr("Bash modules for ISP, web applications and local network."))

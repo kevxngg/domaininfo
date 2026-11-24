@@ -13,6 +13,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib import parse
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -132,6 +133,18 @@ class NormalizeUrlTests(unittest.TestCase):
                     "javascript:alert(1)", "", "https://example.com/\x00"):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 safety.normalize_url(bad)
+
+    def test_dot_segments(self):
+        self.assertEqual(safety.normalize_url("https://a.example/app/../admin"), "https://a.example/admin")
+        self.assertEqual(safety.normalize_url("https://a.example/a/./b/../c?x=../y"), "https://a.example/a/c?x=../y")
+        self.assertEqual(safety.normalize_url("https://a.example/a/b/.."), "https://a.example/a/")
+        self.assertEqual(safety.normalize_url("https://a.example/../../x"), "https://a.example/x")
+        for bad in ("https://a.example/app/%2e%2e/admin", "https://a.example/app/%2E./x", "https://a.example/a%2fb",
+                    "https://a.example/a%2Fb"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                safety.normalize_url(bad)
+        self.assertEqual(safety.normalize_url("https://a.example/x?next=%2e%2e%2fadmin"),
+                         "https://a.example/x?next=%2e%2e%2fadmin")
 
     def test_idna(self):
         self.assertEqual(safety.normalize_url("https://bücher.example/"), "https://xn--bcher-kva.example/")
@@ -662,6 +675,9 @@ class PropertyTests(unittest.TestCase):
             self.assertNotIn("@", url.split("/")[2])
             self.assertFalse(any(ord(c) < 33 for c in url))
             self.assertEqual(safety.normalize_url(url), url)
+            path = parse.urlsplit(url).path
+            self.assertFalse({".", ".."} & set(path.split("/")))
+            self.assertNotRegex(path, "(?i)%2[ef]")
 
         @settings(max_examples=300, deadline=None)
         @given(st.text(alphabet=st.characters(min_codepoint=33, max_codepoint=126), min_size=12, max_size=40))

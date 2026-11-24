@@ -223,7 +223,8 @@ class _SessionAudit:
                 self.secrets.add(value)
         try:
             response = safety.http_request(method, url, self.policy, self.timeout, data=data, jar=jar,
-                                           insecure_tls=self.insecure, deadline=self.deadline, budget=self.budget)
+                                           insecure_tls=self.insecure, deadline=self.deadline, budget=self.budget,
+                                           allow=self.scope.in_targets)
         except http.client.HTTPException as exc:
             raise OSError(tr("Invalid HTTP response: {error}", error=type(exc).__name__)) from None
         finally:
@@ -369,9 +370,11 @@ class _SessionAudit:
         return result
 
     def session_names(self, before, after):
+        """Cookies examined by the fixation and flag checks: every session-named cookie (changed or
+        not, so an unchanged session id is never skipped) plus every cookie the login set or changed."""
         changed = [n for n in after if before.get(n) != after[n]]
-        names = [n for n in changed if SESSION_NAME.search(n)] or changed
-        return names or [n for n in after if SESSION_NAME.search(n)]
+        named = [n for n in after if SESSION_NAME.search(n)]
+        return named + [n for n in changed if n not in named]
 
     def session_checks(self, account):
         result = self.login_account(account)
@@ -414,14 +417,17 @@ class _SessionAudit:
             return
         fixed = [n for n in names if result["before"].get(n) and result["before"][n] == result["after"].get(n)]
         if fixed:
-            self.check("session_fixation", "finding")
-            self.add("session", tr("Session identifier not renewed at login (session fixation)"), "high", "confirmed",
+            # If the login also set another cookie, that one may be the real session token
+            renewed = [n for n in names if n not in fixed and result["after"].get(n)]
+            self.check("session_fixation", "finding", "heuristic" if renewed else "direct")
+            self.add("session", tr("Session identifier not renewed at login (session fixation)"), "high",
+                     "likely" if renewed else "confirmed",
                      tr("Cookie {name} kept the same value before and after the login", name=fixed[0]),
                      tr("Issue a new session identifier on every successful login and discard the old one"),
                      path=path, impact=tr("An attacker who plants a session id can take over the session after "
                                           "the victim logs in"),
                      verification=tr("Note the session cookie before logging in and compare it after logging in"),
-                     references=["CWE-384", "OWASP ASVS V3.2.1"])
+                     references=["CWE-384", "OWASP ASVS V3.2.1"], confidence="medium" if renewed else "high")
         else:
             self.check("session_fixation", "ok")
 
@@ -481,8 +487,8 @@ class _SessionAudit:
             path = parse.urlsplit(url).path or "/"
             if owner is not None and anon.similar(owner):
                 state = "finding"
-                self.add("access_control", tr("Protected URL accessible without authentication"), "high",
-                         "confirmed" if anon.digest == owner.digest else "likely",
+                # Same visible text is still a heuristic: an SPA shell is identical for everyone
+                self.add("access_control", tr("Protected URL accessible without authentication"), "high", "likely",
                          tr("Anonymous: {anonymous} · authenticated: {authenticated}", anonymous=anon.describe(),
                             authenticated=owner.describe()),
                          tr("Require an authenticated session on every protected URL"), path=path,
@@ -496,7 +502,7 @@ class _SessionAudit:
                          tr("Check that the URL is meant to be public; otherwise require a session"), path=path,
                          verification=tr("Compare the anonymous and the authenticated page by hand"),
                          references=["CWE-306"], confidence="low")
-        self.check("anonymous_access", state)
+        self.check("anonymous_access", state, "heuristic" if state == "finding" else "direct")
 
     def protected_urls(self):
         seen = []
@@ -543,7 +549,7 @@ class _SessionAudit:
                     if view.similar(reference):
                         self.add("access_control", tr("Role {role} can open a URL reserved for role {other}",
                                                       role=account.role, other=role), "high",
-                                 "confirmed" if view.digest == reference.digest else "likely", proof,
+                                 "likely", proof,
                                  tr("Enforce the role check on the server for every request"), path=path,
                                  impact=tr("Users can reach functions or data of another role"),
                                  verification=tr("Log in as {account} and open the URL", account=account.id),
@@ -555,7 +561,7 @@ class _SessionAudit:
                                  verification=tr("Log in as {account}, open the URL and compare it with role {other}",
                                                  account=account.id, other=role),
                                  references=["CWE-285"], confidence="low")
-        self.check("access_control", state)
+        self.check("access_control", state, "heuristic" if state == "finding" else "direct")
 
     def logout_checks(self, account, first):
         urls = self.scope.roles.get(account.role) or []
@@ -594,9 +600,9 @@ class _SessionAudit:
         _, _, view = self.view("GET", url, replay)
         path = parse.urlsplit(url).path or "/"
         if view.ok() and reference is not None and view.similar(reference):
-            self.check("logout", "finding")
+            self.check("logout", "finding", "heuristic")
             self.add("logout", tr("The session stays valid on the server after logout"), "high",
-                     "confirmed" if view.digest == reference.digest else "likely",
+                     "likely",
                      tr("The session cookie captured before logout still opens {path}: {view}", path=path,
                         view=view.describe()),
                      tr("Invalidate the session on the server at logout, not only in the browser"), path=logout_path,

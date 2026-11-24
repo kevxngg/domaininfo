@@ -76,11 +76,14 @@ def default_path():
 
 
 def _secure_file(path):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        os.chmod(path.parent, 0o700)
-    except OSError:
-        pass
+    # Only a folder this code creates is made private: an existing folder chosen by the user (e.g.
+    # --db ~/Documents/x.db or /tmp/x.db) keeps its permissions.
+    if not path.parent.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(path.parent, 0o700)
+        except OSError:
+            pass
     fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
     os.close(fd)
     try:

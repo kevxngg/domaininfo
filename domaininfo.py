@@ -26,11 +26,14 @@ import uuid
 import i18n
 from i18n import tr
 
-VERSION = "6.0.0a1"
+VERSION = "6.0.0"
 REPO = "kevxngg/domaininfo"
 CERT_WARN_DAYS = 30
 MODULES = ("dns", "rdap", "asn", "http", "tls", "tech", "mail", "subdomains", "history",
-           "ports", "traceroute", "lookalike", "mikrotik", "webapp")
+           "ports", "traceroute", "lookalike", "mikrotik", "webapp", "session", "apispec", "zap", "browser",
+           "tools", "intel")
+# Static analysis tools used by the "code" mode on a local project folder
+CODE_TOOLS = ("semgrep", "bandit", "pip-audit", "trivy", "gitleaks")
 MODES = {
     "quick": ("dns", "rdap"),
     "web": ("dns", "http", "tls", "tech"),
@@ -41,11 +44,18 @@ MODES = {
     "recon": ("dns", "rdap", "asn", "tech", "subdomains", "history"),
     "brand": ("dns", "lookalike"),
     "webapp": ("webapp",),
+    "session": ("session",),
+    "apispec": ("apispec",),
+    "zap": ("zap",),
+    "browser": ("browser",),
+    "code": ("tools",),
 }
 # Modes and modules that only make sense for a domain (not for an IP address)
 DOMAIN_ONLY = {"mail", "subdomains", "history", "lookalike"}
 # Modes whose target is a full URL (scheme, host, port, path and query)
-URL_MODES = {"webapp"}
+URL_MODES = {"webapp", "session", "apispec", "zap", "browser"}
+# Mode whose target is a local project folder
+PATH_MODES = {"code"}
 
 
 class NotApplicable(Exception):
@@ -89,8 +99,18 @@ def normalize_target(value):
     return host
 
 
+def normalize_path_target(value):
+    """Existing local folder for the code mode, as an absolute path."""
+    path = Path(value.strip().strip('"')).expanduser()
+    if not path.is_dir():
+        raise ValueError(tr("Not an existing folder: {path}", path=value.strip()))
+    return str(path.resolve())
+
+
 def normalize_for_mode(value, mode):
-    """URL modes keep the full URL; every other mode keeps only the host, as always."""
+    """URL modes keep the full URL, the code mode a local folder; every other mode keeps only the host."""
+    if mode in PATH_MODES:
+        return normalize_path_target(value)
     if mode in URL_MODES:
         import safety
         return safety.normalize_url(value)
@@ -320,33 +340,157 @@ def webapp_info(target, args):
     return webapp.audit(target if "://" in target else web_url(target, args), args)
 
 
+def session_info(target, args):
+    """Authenticated session audit; requires an authorization file (--auth-file)."""
+    import session_audit
+    if not getattr(args, "auth_file", None):
+        raise NotApplicable(tr("needs an authorization file (--auth-file)"))
+    return session_audit.audit(str(args.auth_file), args)
+
+
+def apispec_info(target, args):
+    """Passive analysis of a documented OpenAPI/Swagger API."""
+    import apispec
+    return apispec.audit(target, args)
+
+
+def zap_info(target, args):
+    """Passive alerts from an OWASP ZAP daemon the user runs on this computer."""
+    import zapclient
+    return zapclient.audit(target, args)
+
+
+def browser_info(target, args):
+    """Page rendered with JavaScript in headless Chromium (optional Playwright)."""
+    import browser
+    return browser.audit(target, args)
+
+
+def tools_info(target, args):
+    """Optional external tools (--tool, or every code analyzer in the code mode)."""
+    import runners
+    names = list(getattr(args, "tool", None) or [])
+    if not names and args.mode in PATH_MODES:
+        names = list(CODE_TOOLS)
+    if not names:
+        raise NotApplicable(tr("no external tool selected (use --tool)"))
+    result = {"results": [], "findings": [], "components": [], "assets": [], "errors": [], "checks": []}
+    for name in dict.fromkeys(names):
+        tool_target = target
+        if name == "pip-audit" and args.mode in PATH_MODES:
+            requirements = Path(target) / "requirements.txt"
+            if not requirements.is_file():
+                result["results"].append({"tool": name, "status": "skipped", "reason": "not_applicable"})
+                result["checks"].append({"id": name, "state": "not_applicable", "evidence": "direct"})
+                continue
+            tool_target = str(requirements)
+        run = runners.run(name, tool_target, options={"ports": ",".join(map(str, args.ports))} if args.ports else None,
+                          allow_active=bool(getattr(args, "active", False)), scope=list(args.scope or []),
+                          timeout=getattr(args, "tool_timeout", None),
+                          allow_private=bool(getattr(args, "allow_private", False)))
+        for key in ("findings", "components", "assets", "errors"):
+            result[key] += run.get(key) or []
+        result["results"].append({k: run.get(k) for k in ("tool", "status", "reason", "active", "available",
+                                                          "version", "install", "duration", "coverage")})
+        # Coverage counts what really ran: a missing or refused tool is "not evaluated", never "ok".
+        state = {"ok": "ok", "error": "error"}.get(run.get("status"), "not_evaluated")
+        if state == "ok" and run.get("findings"):
+            state = "finding"
+        result["checks"].append({"id": name, "state": state, "evidence": "direct"})
+    if not any(row["status"] == "ok" for row in result["results"]):
+        result["note"] = tr("No external tool ran; see each result for the reason and how to install it")
+    return result
+
+
+_BANNER = re.compile(r"\b([A-Za-z][\w.+-]{1,40})/(\d+(?:\.\d+){1,3})\b")
+
+
+def report_components(report):
+    """Software and versions seen in a report, with how strong the evidence is."""
+    found = []
+    modules = report.get("modules", {})
+    data = (modules.get("tools") or {}).get("data") or {}
+    found += [c for c in data.get("components", []) if isinstance(c, dict)]
+    banners = []
+    tech = (modules.get("tech") or {}).get("data") or {}
+    banners += (tech.get("headers_grade") or {}).get("version_leaks") or []
+    if tech.get("generator"):
+        banners.append(tech["generator"].replace(" ", "/", 1))
+    web = (modules.get("webapp") or {}).get("data") or {}
+    banners += (web.get("headers") or {}).get("version_leaks") or []
+    for text in banners:
+        for name, version in _BANNER.findall(str(text)):
+            # A banner is what the server says about itself: distributions backport fixes without changing
+            # the version, so it never supports more than a 'likely' match.
+            found.append({"name": name.lower(), "version": version, "evidence": "heuristic",
+                          "source": "banner", "location": str(text)[:120]})
+    unique = {}
+    for item in found:
+        unique.setdefault((str(item.get("name")).lower(), str(item.get("version"))), item)
+    return list(unique.values())
+
+
+def intel_info(target, args, report):
+    """Known vulnerabilities (OSV, NVD, CISA KEV) for the software versions found so far."""
+    import vulnintel
+    components = report_components(report)
+    if not components:
+        return {"components": [], "findings": [], "matches": [],
+                "checks": [{"id": "correlation", "state": "not_applicable", "evidence": "direct"}],
+                "note": tr("No software versions were identified, so there is nothing to correlate")}
+    result = vulnintel.correlate(components, target=target)
+    result["components"] = components
+    state = "error" if result.get("errors") and not result.get("sources") else (
+        "finding" if result.get("findings") else "ok")
+    # Version evidence from banners is heuristic, so the correlation is too
+    direct = all(c.get("evidence") == "direct" for c in components)
+    result["checks"] = [{"id": "correlation", "state": state, "evidence": "direct" if direct else "heuristic"}]
+    return result
+
+
 RUNNERS = {"dns": dns_info, "rdap": rdap_info, "asn": asn_info, "http": http_info,
            "tls": tls_info, "tech": tech_info, "mail": mail_info, "subdomains": subdomains_info,
            "history": history_info, "ports": ports_info, "traceroute": trace_info,
-           "lookalike": lookalike_info, "mikrotik": mikrotik_info, "webapp": webapp_info}
+           "lookalike": lookalike_info, "mikrotik": mikrotik_info, "webapp": webapp_info,
+           "session": session_info, "apispec": apispec_info, "zap": zap_info, "browser": browser_info,
+           "tools": tools_info, "intel": intel_info}
+
+
+def active_modules(args):
+    """Modules of the mode plus the optional ones requested with --tool and --intel."""
+    names = list(MODES[args.mode])
+    if getattr(args, "tool", None) and "tools" not in names:
+        names.append("tools")
+    if getattr(args, "intel", False):
+        names.append("intel")
+    return names
 
 
 def scan(target, args, on_progress=None):
     report = {"meta": {"tool": "DomainInfo", "version": VERSION, "target": target,
                        "date": datetime.now(timezone.utc).isoformat(), "mode": args.mode,
-                       "platform": platform.system()}, "modules": {}}
-    for index, name in enumerate(MODES[args.mode], 1):
+                       "platform": platform.system(), "language": i18n.language()}, "modules": {}}
+    names = active_modules(args)
+    for index, name in enumerate(names, 1):
         if name in args.skip:
             report["modules"][name] = {"status": "skipped"}
             if on_progress:
-                on_progress(name, "skipped", index, len(MODES[args.mode]))
+                on_progress(name, "skipped", index, len(names))
             continue
         if on_progress:
-            on_progress(name, "running", index, len(MODES[args.mode]))
+            on_progress(name, "running", index, len(names))
         try:
-            data = RUNNERS[name](target, args)
+            data = intel_info(target, args, report) if name == "intel" else RUNNERS[name](target, args)
             report["modules"][name] = {"status": "ok", "data": data}
         except NotApplicable as exc:
             report["modules"][name] = {"status": "skipped", "reason": str(exc)}
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
             report["modules"][name] = {"status": "error", "error": str(exc)}
+        except Exception as exc:  # noqa: BLE001 - hostile data must never cost the other modules' results
+            report["modules"][name] = {"status": "error", "error": tr(
+                "Unexpected error in the module ({kind}): {error}", kind=type(exc).__name__, error=str(exc)[:300])}
         if on_progress:
-            on_progress(name, report["modules"][name]["status"], index, len(MODES[args.mode]))
+            on_progress(name, report["modules"][name]["status"], index, len(names))
         # The readable output draws its own progress; JSON mode keeps the classic stderr lines.
         if not args.quiet and not getattr(args, "human", False):
             print(f"[{name}] {report['modules'][name]['status']}", file=sys.stderr)
@@ -394,15 +538,18 @@ def save_report(report, directory, formats):
 
 
 def save_batch(reports, directory):
-    """Infrastructure map (JSON/MD) and CSV summary of several targets."""
+    """Infrastructure map (JSON/MD), attack-surface inventory (JSON) and CSV summary of several targets."""
     import infra
+    import inventory
     directory.mkdir(parents=True, exist_ok=True)
-    # File names stay stable across languages so scripts can find them.
-    stem = f"domaininfo_lote_{datetime.now(timezone.utc):%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:6]}"
+    # File names stay the same in every language so scripts can find them.
+    stem = f"domaininfo_batch_{datetime.now(timezone.utc):%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:6]}"
     result = infra.correlate(reports)
     paths = []
-    for suffix, content in ((".csv", infra.to_csv(reports)), ("_mapa.md", infra.map_markdown(result)),
-                            ("_mapa.json", json.dumps(result, ensure_ascii=False, indent=2) + "\n")):
+    for suffix, content in ((".csv", infra.to_csv(reports)), ("_map.md", infra.map_markdown(result)),
+                            ("_map.json", json.dumps(result, ensure_ascii=False, indent=2) + "\n"),
+                            ("_inventory.json", json.dumps(inventory.build(reports), ensure_ascii=False,
+                                                           indent=2, default=str) + "\n")):
         path = directory / (stem + suffix)
         atomic_write(path, content)
         paths.append(str(path))
@@ -445,6 +592,17 @@ def doctor():
             "optional": {name: shutil.which(name) for name in
                          ("traceroute", "tracepath", "tracert", "bash", "nmap", "dig", "whois")},
             "integrations": tools.detect_all()}
+
+
+def tool_list(value):
+    """--tool: comma-separated names from the optional tools catalog."""
+    import tools
+    names = [item.strip().lower() for item in value.split(",") if item.strip()]
+    unknown = [name for name in names if name not in tools.CATALOG]
+    if unknown or not names:
+        raise argparse.ArgumentTypeError(tr("Unknown tool: {names}. Available: {available}",
+                                            names=", ".join(unknown) or value, available=", ".join(tools.CATALOG)))
+    return names
 
 
 def host_list(value):
@@ -522,8 +680,10 @@ def parser():
     audit = cli.add_argument_group(tr("audit"))
     audit.add_argument("-m", "--mode", choices=MODES, default="quick",
                        help=tr("quick: DNS and registration · web: HTTP, headers and TLS · ports: TCP ports · "
-                               "full: everything · mikrotik: RouterOS · webapp: one specific URL "
-                               "(default: %(default)s)"))
+                               "full: everything · mikrotik: RouterOS · webapp: one specific URL · session: "
+                               "authenticated session audit · apispec: documented API · zap: OWASP ZAP passive "
+                               "alerts · browser: page rendered with JavaScript · code: local project with code "
+                               "analyzers (default: %(default)s)"))
     audit.add_argument("--url", metavar="URL",
                        help=tr("webapp: full URL to audit; port, path and parameters are kept"))
     audit.add_argument("-f", "--file", type=Path, metavar=tr("FILE"),
@@ -558,6 +718,52 @@ def parser():
                        help=tr("allow a public target to redirect or resolve to internal networks (only if authorized)"))
     scope.add_argument("--insecure-tls", action="store_true",
                        help=tr("read the page even if its certificate is not valid (noted in the report)"))
+
+    web = cli.add_argument_group(tr("sessions, APIs and web integrations"))
+    web.add_argument("--auth-file", type=Path, metavar=tr("FILE"),
+                     help=tr("session mode: authorization file with targets, test accounts (environment "
+                             "variable names) and limits; see docs/AUTHENTICATED_AUDIT.md"))
+    web.add_argument("--zap-url", metavar="URL",
+                     help=tr("zap mode: API of the OWASP ZAP you run on this computer (loopback only)"))
+    web.add_argument("--zap-api-key", metavar=tr("KEY"), help=tr("zap mode: API key (or ZAP_API_KEY)"))
+    web.add_argument("--zap-wait", type=bounded_int(5, 900), metavar=tr("SECONDS"),
+                     help=tr("zap mode: maximum wait for the passive scan"))
+    web.add_argument("--zap-spider", action="store_true",
+                     help=tr("zap mode: also crawl the site with the ZAP spider (still no active scan)"))
+    web.add_argument("--zap-spider-max", type=bounded_int(1, 500), metavar="N",
+                     help=tr("zap mode: maximum pages for the spider"))
+    web.add_argument("--browser-timeout", type=bounded_int(5, 120), metavar=tr("SECONDS"),
+                     help=tr("browser mode: page load timeout"))
+
+    external = cli.add_argument_group(tr("external tools and vulnerability intelligence"))
+    external.add_argument("--tool", action="extend", type=tool_list, default=[], metavar=tr("TOOLS"),
+                          help=tr("run optional tools, e.g. nmap,nuclei,whatweb (see --tools)"))
+    external.add_argument("--active", action="store_true",
+                          help=tr("allow tools that send probes (nmap, nuclei, sslyze, testssl.sh…); the target "
+                                  "must also be listed in --scope"))
+    external.add_argument("--tool-timeout", type=bounded_int(5, 3600), metavar=tr("SECONDS"),
+                          help=tr("maximum time per external tool"))
+    external.add_argument("--intel", action="store_true",
+                          help=tr("look up known vulnerabilities (OSV, NVD, CISA KEV) for the versions found"))
+    external.add_argument("--tools", action="store_true",
+                          help=tr("show which optional tools are installed and how to install the rest"))
+
+    center = cli.add_argument_group(tr("Security Center, history and exports"))
+    center.add_argument("--store", metavar=tr("PROJECT"),
+                        help=tr("also save the results in the Security Center database under this project"))
+    center.add_argument("--db", type=Path, metavar=tr("FILE"), help=tr("Security Center database (default: user data folder)"))
+    center.add_argument("--history", metavar=tr("TARGET"), help=tr("list saved audits of a target (with --project)"))
+    center.add_argument("--compare", nargs=2, type=int, metavar=("A", "B"),
+                        help=tr("compare two saved audits by id (only meaningful if their coverage is comparable)"))
+    center.add_argument("--export", choices=("csv", "pdf", "technical-pdf"),
+                        help=tr("export a project's findings: CSV, executive PDF or technical PDF"))
+    center.add_argument("--project", metavar=tr("PROJECT"), help=tr("project for --history and --export"))
+    center.add_argument("--serve", action="store_true", help=tr("open the DomainInfo Security Center (local web dashboard)"))
+    center.add_argument("--host", default="127.0.0.1", help=tr("Security Center address (default: %(default)s)"))
+    center.add_argument("--port", type=bounded_int(1, 65535), default=8765, help=tr("Security Center port (default: %(default)s)"))
+    center.add_argument("--no-browser", action="store_true", help=tr("do not open the browser automatically"))
+    center.add_argument("--allow-remote", action="store_true",
+                        help=tr("let the Security Center listen on a non-loopback address (use an HTTPS tunnel)"))
 
     router = cli.add_argument_group("mikrotik")
     router.add_argument("--routeros-version", metavar=tr("VERSION"),
@@ -763,6 +969,99 @@ def watch(targets, args, view):
         args.open = saved_open
 
 
+def show_tools(args):
+    """Optional tools: installed or not, version, compatibility and how to install them."""
+    import tools
+    data = tools.detect_all()
+    if args.json or args.quiet or not sys.stdout.isatty():
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+        return 0
+    print(tr("Optional tools (DomainInfo works without them; nothing is downloaded automatically)"))
+    for name, info in data.items():
+        if info.get("available"):
+            state = tr("installed {version}", version=info.get("version") or "?")
+            if info.get("compatible") is False:
+                state += " · " + tr("needs {minimum} or newer", minimum=info.get("minimum"))
+        else:
+            state = tr("not installed")
+        print(f"  {name:<11} {info.get('category', ''):<7} {state}")
+        if not info.get("available") or info.get("compatible") is False:
+            print("              " + tr("install: {hint}", hint=info.get("install")))
+    return 0
+
+
+def serve_center(args):
+    import server
+    try:
+        return server.serve(host=args.host, port=args.port, open_browser=not args.no_browser,
+                            allow_remote=args.allow_remote, db_path=str(args.db) if args.db else None)
+    except server.MissingExtra as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+
+def store_project(store, name, create=False):
+    for project in store.list_projects():
+        if project["name"].lower() == " ".join(str(name).split()).lower():
+            return project
+    if create:
+        return store.create_project(name)
+    raise KeyError(tr("Unknown project: {name}", name=name))
+
+
+def store_reports(reports, args):
+    """--store: save the reports in the Security Center database; each target joins the project scope."""
+    import auditstore
+    with auditstore.AuditStore(str(args.db) if args.db else None) as store:
+        project = store_project(store, args.store, create=True)
+        ids = []
+        for report in reports:
+            target = report["meta"]["target"]
+            entry = store.in_scope(project["id"], target)
+            if entry is None and args.mode not in PATH_MODES:
+                entry = store.add_target(project["id"], target)
+            ids.append(store.save_audit(project["id"], report, entry["id"] if entry else None)["id"])
+        return ids
+
+
+def store_command(args, cli):
+    """--history, --compare and --export over the Security Center database."""
+    import auditstore
+    with auditstore.AuditStore(str(args.db) if args.db else None) as store:
+        try:
+            if args.compare:
+                result = store.compare(*args.compare)
+                print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+                return 0
+            if not args.project:
+                cli.error(tr("--history and --export need --project"))
+            project = store_project(store, args.project)
+            if args.history:
+                rows = store.target_history(project["id"], args.history)
+                print(json.dumps(rows, ensure_ascii=False, indent=2, default=str))
+                return 0
+            import exporters
+            data = store.report_bundle(project["id"])
+            if args.export == "csv":
+                content, suffix = exporters.findings_csv(data["findings"]).encode("utf-8-sig"), ".csv"
+            else:
+                build = exporters.executive_pdf if args.export == "pdf" else exporters.technical_pdf
+                content = build(data)
+                suffix = ("_executive" if args.export == "pdf" else "_technical") + ".pdf"
+            args.output.mkdir(parents=True, exist_ok=True)
+            name = re.sub(r"[^a-zA-Z0-9._-]", "_", project["name"])
+            path = args.output / f"domaininfo_{name}_{datetime.now(timezone.utc):%Y%m%d_%H%M%S}{suffix}"
+            path.write_bytes(content)
+            print(str(path))
+            return 0
+        except (KeyError, ValueError) as exc:
+            print(str(exc).strip("'\""), file=sys.stderr)
+            return 1
+
+
 def requested_language(argv):
     """``--lang`` value from the raw arguments, read before the parser so --help is translated too."""
     for index, item in enumerate(argv):
@@ -796,6 +1095,23 @@ def main(argv=None):
     if args.doctor:
         print(json.dumps(doctor(), ensure_ascii=False, indent=2))
         return 0
+    if args.tools:
+        return show_tools(args)
+    if args.serve:
+        return serve_center(args)
+    if args.compare or args.history or args.export:
+        return store_command(args, cli)
+    if args.active and not args.tool:
+        cli.error(tr("--active only applies together with --tool"))
+    if args.mode == "session":
+        if not args.auth_file:
+            cli.error(tr("-m session needs --auth-file (see docs/AUTHENTICATED_AUDIT.md)"))
+        if not args.target and not args.url and not args.file:
+            import authscope
+            try:
+                args.target = authscope.load(str(args.auth_file)).login_url
+            except (OSError, ValueError) as exc:
+                cli.error(str(exc))
     if args.routeros_version or args.offline:
         if args.mode != "mikrotik":
             cli.error(tr("--routeros-version and --offline require -m mikrotik"))
@@ -809,7 +1125,7 @@ def main(argv=None):
                 cli.error(str(exc))
     if args.url:
         if args.mode not in URL_MODES:
-            cli.error(tr("--url requires -m webapp"))
+            cli.error(tr("--url requires a URL mode: {modes}", modes=", ".join(sorted(URL_MODES))))
         if args.target or args.file:
             cli.error(tr("Use --url, a target or --file, not several at once"))
         args.target = args.url
@@ -854,7 +1170,19 @@ def main(argv=None):
         view = CliView(sys.modules[__name__], args)
     if args.watch:
         return watch(targets, args, view)
-    failed, _ = run_targets(targets, args, view)
+    failed, reports = run_targets(targets, args, view)
+    if args.store:
+        try:
+            ids = store_reports(reports, args)
+            message = tr("Saved in the Security Center (project {project}): audits {ids}",
+                         project=args.store, ids=", ".join(map(str, ids)))
+            if view:
+                view.note(message)
+            elif args.verbose:
+                print(message, file=sys.stderr)
+        except (OSError, ValueError, KeyError) as exc:
+            print(tr("Could not save in the Security Center: {error}", error=exc), file=sys.stderr)
+            failed = True
     return 1 if failed or invalid else 0
 
 

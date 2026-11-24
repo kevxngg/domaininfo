@@ -4,7 +4,7 @@ permissions:
   contents: read
 jobs:
   python:
-    # Núcleo sin dependencias: las pruebas corren con Python estándar en los tres sistemas.
+    # Dependency-free core: the tests run with plain Python on the three systems.
     strategy:
       fail-fast: false
       matrix:
@@ -18,31 +18,35 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: python -m unittest discover -s tests -v
       - run: python domaininfo.py --doctor
+      - run: python domaininfo.py --lang es --help
       - name: Windows launcher
         if: runner.os == 'Windows'
         run: .\domaininfo.cmd --doctor
   quality:
-    # Herramientas de desarrollo (no forman parte del núcleo). Sin red hacia objetivos reales:
-    # las pruebas usan servidores locales.
+    # Development tools (not part of the core). No traffic to real targets: tests use local servers.
     runs-on: ubuntu-latest
+    env:
+      NEW_MODULES: >-
+        safety.py evidence.py webapp.py tools.py authscope.py session_audit.py apispec.py zapclient.py
+        browser.py runners.py vulnintel.py inventory.py auditstore.py exporters.py server.py i18n.py
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install hypothesis ruff bandit pyright
-      - name: Pruebas con propiedades (Hypothesis)
+      - run: python -m pip install hypothesis ruff bandit pyright fastapi uvicorn httpx
+      - name: Tests with property-based tests and the Security Center extra
         run: python -m unittest discover -s tests
       - name: Ruff
         run: |
           ruff check --select E9,F .
-          ruff check --select E9,F,B,S --ignore S101 safety.py evidence.py webapp.py tools.py
+          ruff check --select E9,F,B,S --ignore S101 $NEW_MODULES
       - name: Bandit
         run: |
-          bandit -q -ll safety.py evidence.py webapp.py tools.py
+          bandit -q -ll $NEW_MODULES
           bandit -q -lll -c pyproject.toml -r .
-      - name: Pyright (módulos 6.0)
-        run: pyright --pythonversion 3.10 safety.py evidence.py webapp.py tools.py
+      - name: Pyright (6.0 modules)
+        run: pyright --pythonversion 3.10 $NEW_MODULES
   bash:
     runs-on: ubuntu-latest
     steps:

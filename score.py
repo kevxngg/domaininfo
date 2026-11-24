@@ -20,7 +20,7 @@ TRANSPORT_CHECKS = {"hsts", "https"}
 
 
 # Legacy grade area for findings copied from evidence-model modules
-EVIDENCE_AREAS = {"webapp": "Web app", "auth": "Sessions", "api": "API", "zap": "Web app", "browser": "Web app",
+EVIDENCE_AREAS = {"webapp": "Web app", "session": "Sessions", "apispec": "API", "zap": "Web app", "browser": "Web app",
                   "tools": "Tools", "intel": "Vulnerabilities"}
 
 

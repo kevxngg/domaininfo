@@ -110,12 +110,25 @@ class AppHandler(BaseHTTPRequestHandler):
     def do_HEAD(self):  # noqa: N802
         self.do_GET()
 
-    def do_GET(self):  # noqa: N802
+    def route(self, method):
+        """Recorded path; True when a configured redirect answered (prefix "/app" is mounted on "/")."""
         path = self.path.split("?", 1)[0]
-        self.app.seen.append(("GET", path))
+        self.app.seen.append((method, path))
+        if (method, path) in self.app.redirects:
+            status, location = self.app.redirects[(method, path)]
+            self.send(status, "", [("Location", location)])
+            return path, True
+        return (path[4:] or "/") if path.startswith("/app/") else path, False
+
+    def do_GET(self):  # noqa: N802
+        path, done = self.route("GET")
+        if done:
+            return
         sid, state = self.session()
         user = state.get("user") if state else None
-        if path in self.app.static:
+        if self.app.cfg.get("spa") and path in ("/home", "/admin"):
+            self.send(200, "<title>Shop</title><div id='root'>Loading the application</div>")
+        elif path in self.app.static:
             status, body, ctype = self.app.static[path]
             self.send(status, body, content_type=ctype)
         elif path == "/login":
@@ -147,10 +160,11 @@ class AppHandler(BaseHTTPRequestHandler):
             self.send(404, "<title>Not found</title>")
 
     def do_POST(self):  # noqa: N802
-        path = self.path.split("?", 1)[0]
         length = int(self.headers.get("Content-Length") or 0)
         form = dict(parse.parse_qsl(self.rfile.read(length).decode()))
-        self.app.seen.append(("POST", path))
+        path, done = self.route("POST")
+        if done:
+            return
         if path == "/echo":
             self.send(200, json.dumps({"method": "POST", "form": form, "cookie": self.headers.get("Cookie")}),
                       content_type="application/json")
@@ -189,6 +203,8 @@ class AppHandler(BaseHTTPRequestHandler):
                            "action='/mfa'><input type='text' name='otp' autocomplete='one-time-code'></form>")
             return
         headers = [("Location", "/home")]
+        if self.app.cfg.get("extra_cookie"):  # a non-session cookie that changes at every login
+            headers.append(("Set-Cookie", f"pref={secrets.token_hex(4)}; Path=/; HttpOnly; SameSite=Lax"))
         if self.app.cfg["fixation"]:
             state["user"] = username
         else:
@@ -207,6 +223,7 @@ class App:
         self.cfg = dict(self.DEFAULTS, **cfg)
         self.sessions, self.failures, self.seen, self.attempts, self.issued = {}, {}, [], [], []
         self.static = {}
+        self.redirects = {}  # (method, path) -> (status, location)
 
     def __enter__(self):
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), AppHandler)
@@ -365,6 +382,20 @@ class AuthScopeTests(unittest.TestCase):
         self.assertFalse(scope.in_targets(self.base + "/application"))
         self.assertFalse(scope.in_targets("https://127.0.0.1:8000/app/x"))
 
+    def test_dot_segments_cannot_leave_the_prefix(self):
+        scope = self.load(config(self.base, targets=[self.base + "/app"], login={"url": self.base + "/app/login"},
+                                 logout=None, roles={"user": {"protected_urls": []}, "admin": {}}))
+        for url in ("/app/../admin", "/app/./../admin", "/app/x/../../admin", "/app/%2e%2e/admin",
+                    "/app/%2E./admin", "/app%2fadmin", "/app/..%2Fadmin", "/app/.."):
+            with self.subTest(url=url):
+                self.assertFalse(scope.in_targets(self.base + url))
+        self.assertTrue(scope.in_targets(self.base + "/app/x/../y"))
+        self.assertTrue(scope.in_targets(self.base + "/app/./y"))
+        self.assertFalse(scope.in_targets(self.base + "/application/x"))
+        with self.assertRaises(authscope.AuthorizationError):
+            self.load(config(self.base, targets=[self.base + "/app"], login={"url": self.base + "/app/../login"},
+                             logout=None, roles={"user": {"protected_urls": []}, "admin": {}}))
+
 
 # -- safety: method-generic client and cookie jar -----------------------------------------------------
 
@@ -408,6 +439,46 @@ class SafetyRequestTests(unittest.TestCase):
             safety.http_request("GET", "http://127.0.0.1/", safety.ScopePolicy("http://127.0.0.1/"), 3, data={"a": 1})
         with self.assertRaises(ValueError):
             safety.encode_form({"a": "x" * (safety.MAX_REQUEST_BODY + 1)})
+
+    def test_redirect_hops_checked_against_allow(self):
+        with App() as app:
+            app.redirects[("GET", "/app/jump")] = (302, "/admin")
+            app.redirects[("POST", "/app/jump")] = (307, "/app/../steal")
+            policy = safety.ScopePolicy(app.base)
+
+            def allow(url):
+                return parse.urlsplit(url).path.startswith("/app/")
+
+            for method, data in (("GET", None), ("POST", {"p": "x"})):
+                with self.subTest(method=method):
+                    response = safety.http_request(method, app.base + "/app/jump", policy, 3, data=data,
+                                                   jar=safety.CookieJar(), allow=allow)
+                    self.assertIn(response.status, (302, 307))
+                    self.assertIn("blocked", response.redirects[-1])
+            response = safety.http_get(app.base + "/app/jump", policy, 3, allow=allow)
+            self.assertIn("blocked", response.redirects[-1])
+            self.assertNotIn(("GET", "/admin"), app.seen)
+            self.assertFalse(any(path in ("/steal", "/app/steal") for _, path in app.seen))
+            with self.assertRaises(safety.ScopeError):
+                safety.http_request("GET", app.base + "/admin", policy, 3, allow=allow)
+            self.assertNotIn(("GET", "/admin"), app.seen)
+
+    def test_https_to_http_refused_with_cookie_jar(self):
+        calls = []
+
+        def fake(url, *args, **kwargs):
+            calls.append(url)
+            return 302, [("Location", "http://a.example/next")], b"", "93.184.216.34", True
+
+        policy = safety.ScopePolicy("https://a.example/", resolver=lambda host: ["93.184.216.34"])
+        with patch("safety._request_once", side_effect=fake):
+            response = safety.http_request("GET", "https://a.example/x", policy, 3, jar=safety.CookieJar())
+            self.assertEqual(calls, ["https://a.example/x"])
+            self.assertIn("blocked", response.redirects[-1])
+            calls.clear()
+            response = safety.http_request("GET", "https://a.example/x", policy, 3, max_redirects=1)
+            self.assertTrue(response.redirects[0].get("downgrade"))  # without a jar it is only flagged
+            self.assertEqual(calls[:2], ["https://a.example/x", "http://a.example/next"])
 
     def test_cookie_rules(self):
         jar = safety.CookieJar()
@@ -467,7 +538,7 @@ class SessionAuditTests(unittest.TestCase):
         self.assertIn("No lockout or rate limit after 3 failed attempts", found)
         self.assertTrue(any("lives 90 days" in t for t in found))
         by_title = {f["title"]: f for f in result["findings"]}
-        self.assertEqual(by_title["Role user can open a URL reserved for role admin"]["status"], "confirmed")
+        self.assertEqual(by_title["Role user can open a URL reserved for role admin"]["status"], "likely")
         self.assertEqual(by_title["Login responses reveal whether an account exists"]["status"], "likely")
         self.assertEqual(app.wrong_attempts("alice.tester"), 3)  # never more than the cap
         self.assertEqual(app.wrong_attempts("admin.tester"), 0)  # only the configured test account
@@ -522,6 +593,32 @@ class SessionAuditTests(unittest.TestCase):
             with self.assertRaises(authscope.AuthorizationError):
                 run_session(app)
             self.assertFalse(any(method == "POST" for method, _ in app.seen))
+
+    def test_login_redirects_stay_inside_the_prefixes(self):
+        with App(action="/app/login") as app:
+            app.redirects[("POST", "/app/login")] = (307, "/steal")
+            app.redirects[("GET", "/app/start")] = (302, "/outside")
+            result = run_session(app, targets=[app.base + "/app/"], login={"url": app.base + "/app/login"},
+                                 logout=None, roles={"user": {"protected_urls": [app.base + "/app/start"]},
+                                                     "admin": {"protected_urls": []}})
+            self.assertFalse(any(path in ("/steal", "/outside") for _, path in app.seen))
+            self.assertIn(("POST", "/app/login"), app.seen)
+            self.assert_no_secrets(result, app)
+
+    def test_fixation_examined_when_another_cookie_changes(self):
+        with App(fixation=True, extra_cookie=True, flags=False) as app:
+            result = run_session(app)
+        self.assertEqual(states(result)["session_fixation"], "finding")
+        self.assertIn("Session identifier not renewed at login (session fixation)", titles(result))
+        self.assertIn("Session cookie sid without HttpOnly", titles(result))
+
+    def test_identical_spa_shell_is_never_confirmed(self):
+        with App(spa=True, idor=True) as app:
+            result = run_session(app)
+        found = [f for f in result["findings"] if f["category"] in ("access_control", "logout")]
+        self.assertTrue(found)
+        for finding in found:
+            self.assertNotEqual(finding["status"], "confirmed", finding["title"])
 
     def test_no_secret_in_exceptions(self):
         password = ENV["DI_PASS_A"]
@@ -664,7 +761,8 @@ class ZapTests(unittest.TestCase):
         by_title = {f["title"]: f for f in result["findings"]}
         self.assertEqual(set(by_title), {"Content Security Policy (CSP) Header Not Set", "Cookie No HttpOnly Flag",
                                          "Timestamp Disclosure"})
-        self.assertEqual(by_title["Content Security Policy (CSP) Header Not Set"]["status"], "confirmed")
+        # ZAP's own "High" confidence is still a scanner rule: likely, never confirmed
+        self.assertEqual(by_title["Content Security Policy (CSP) Header Not Set"]["status"], "likely")
         self.assertIn("CWE-693", by_title["Content Security Policy (CSP) Header Not Set"]["references"])
         self.assertIn("WASC-15", by_title["Content Security Policy (CSP) Header Not Set"]["references"])
         self.assertEqual(by_title["Cookie No HttpOnly Flag"]["status"], "likely")

@@ -61,6 +61,19 @@ def route_decision(url, policy):
     return "allow", None
 
 
+def websocket_decision(url, policy):
+    """Same rules as ``route_decision`` for ws:// and wss:// (mapped to http:// and https://)."""
+    parts = parse.urlsplit(url)
+    if parts.scheme not in ("ws", "wss"):
+        return "block", tr("scheme {scheme} not allowed", scheme=parts.scheme[:10])
+    return route_decision(("https" if parts.scheme == "wss" else "http") + url[len(parts.scheme):], policy)
+
+
+# Fallback when Playwright cannot route WebSockets: the page cannot open any socket at all.
+DISABLE_WEBSOCKETS = ("(() => { const blocked = function () { throw new Error('WebSocket disabled by DomainInfo'); };"
+                      " Object.defineProperty(window, 'WebSocket', {value: blocked, writable: false}); })();")
+
+
 def resolver_rules(policy):
     """Chromium ``--host-resolver-rules`` mapping each known in-scope name to its pinned IP; every
     other name fails to resolve (so DNS rebinding cannot redirect the browser)."""
@@ -137,6 +150,19 @@ def audit(url, args):
         except Exception:  # noqa: S110  # nosec B110
             pass
 
+    websocket_guard = {"active": False}
+
+    def on_websocket(ws):
+        # context.route() does not see WebSockets; apply the same scope rules to ws:// and wss://
+        decision, reason = websocket_decision(ws.url, policy)
+        if decision == "allow":
+            ws.connect_to_server()
+        else:
+            if len(blocked) < MAX_EVENTS:
+                blocked.append({"url": evidence.redact_url(ws.url.replace("ws", "http", 1))[:300], "reason": reason,
+                                "type": "websocket"})
+            ws.close()
+
     try:
         with module.sync_playwright() as play:
             chromium = play.chromium.launch(headless=True, args=[f"--host-resolver-rules={rules}"])
@@ -144,6 +170,11 @@ def audit(url, args):
                 context = chromium.new_context(ignore_https_errors=bool(getattr(args, "insecure_tls", False)),
                                                service_workers="block", accept_downloads=False)
                 context.route("**/*", on_route)
+                if hasattr(context, "route_web_socket"):  # Playwright 1.48+
+                    context.route_web_socket("**/*", on_websocket)
+                    websocket_guard["active"] = True
+                else:
+                    context.add_init_script(DISABLE_WEBSOCKETS)
                 page = context.new_page()
                 page.on("console", on_console)
                 page.on("pageerror", on_page_error)
@@ -200,10 +231,16 @@ def audit(url, args):
               {"id": "mixed_content", "state": "finding" if mixed else ("ok" if https else "not_applicable"),
                "evidence": "direct"},
               analysis.checks.get("forms", {"id": "forms", "state": "not_applicable", "evidence": "direct"}),
-              analysis.checks.get("csrf", {"id": "csrf", "state": "not_applicable", "evidence": "direct"})]
+              analysis.checks.get("csrf", {"id": "csrf", "state": "not_applicable", "evidence": "direct"}),
+              {"id": "websocket_guard", "state": "ok" if websocket_guard["active"] else "not_evaluated",
+               "evidence": "direct"}]
+    note = tr("Rendered in headless Chromium; out-of-scope requests are blocked and nothing is submitted")
+    if not websocket_guard["active"]:
+        note += " · " + tr("This Playwright version cannot filter WebSockets (needs 1.48 or newer), so the page "
+                           "could not open any WebSocket; update Playwright")
     return cast(dict[str, Any], webapp._scrub({
         "url": target, "final_url": final, "status": status, "available": True, "title": parsed.title or None,
         "dom_length": len(dom), "forms": forms, "cookies": cookies, "console_errors": console,
         "mixed_content": mixed, "blocked_requests": blocked, "findings": findings, "checks": checks,
-        "assessment": evidence.scores(findings, checks),
-        "note": tr("Rendered in headless Chromium; out-of-scope requests are blocked and nothing is submitted")}))
+        "websocket_filter": websocket_guard["active"], "assessment": evidence.scores(findings, checks),
+        "note": note}))

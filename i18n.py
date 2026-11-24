@@ -13,7 +13,7 @@ import importlib
 import os
 
 SUPPORTED = ("en", "es")
-_PARTS = ("ui", "modules", "phase2", "phase3", "phase4")
+_PARTS = ("ui", "cli", "modules", "phase2", "phase3", "phase4")
 _current = None
 _catalogs = {}
 

@@ -312,7 +312,7 @@ Usa los modos de red solo sobre sistemas que tengas autorización para revisar."
     "Press a key · 0 to exit": "Pulsa una tecla · 0 para salir",
     "Choose a module to start. NUMBER + ENTER": "Elige un módulo para comenzar. NÚMERO + ENTER",
     "NUMBER + ENTER · 0 to exit": "NÚMERO + ENTER · 0 para salir",
-    "DOMAINS / NETWORKS / ROUTEROS": "DOMINIOS / REDES / ROUTEROS",
+    "SECURITY SUITE · DOMAINS / WEB / NETWORKS": "SUITE DE SEGURIDAD · DOMINIOS / WEB / REDES",
     "ANALYSIS PANEL": "PANEL DE ANÁLISIS",
     "[0 / r] Back to the previous menu": "[0 / r] Regresar al menú anterior",
     "You are already at the main menu. Use 0 to exit.": "Ya estás en el menú principal. Usa 0 para salir.",

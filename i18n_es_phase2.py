@@ -317,4 +317,16 @@ STRINGS = {
     "Set session cookies from the server with HttpOnly": "Crea las cookies de sesión desde el servidor con HttpOnly",
     "Cookies written by JavaScript cannot be HttpOnly: an XSS could read them":
         "Las cookies escritas por JavaScript no pueden ser HttpOnly: un XSS podría leerlas",
+    # safety.py (redirect scope and URL normalization for authenticated audits)
+    "Percent-encoded dot or slash in the URL path is not accepted":
+        "No se acepta un punto o una barra codificados con porcentaje en la ruta de la URL",
+    "The URL is outside the authorized URL prefixes": "La URL está fuera de los prefijos de URL autorizados",
+    "Redirect from HTTPS to HTTP refused while session cookies are in use":
+        "Redirección de HTTPS a HTTP rechazada mientras se usan cookies de sesión",
+    # Security review fixes (apispec, browser)
+    "The document is not an OpenAPI/Swagger JSON object": "El documento no es un objeto JSON de OpenAPI/Swagger",
+    "This Playwright version cannot filter WebSockets (needs 1.48 or newer), so the page could not open any "
+    "WebSocket; update Playwright":
+        "Esta versión de Playwright no puede filtrar WebSockets (necesita la 1.48 o posterior), así que la página "
+        "no pudo abrir ningún WebSocket; actualiza Playwright",
 }

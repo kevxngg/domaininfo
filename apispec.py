@@ -9,6 +9,9 @@ without security, API keys in query parameters, HTTP Basic over http://, sensiti
 parameters and deprecated operations still published. JSON documents only; a YAML document is
 reported as ``not_evaluated`` (no third-party parser in the core).
 
+The document is controlled by the target, so every field is type-checked before use: a malformed
+document produces fewer findings, never an exception.
+
 Public API: ``audit(url, args) -> dict`` and ``analyze(document, source_url) -> dict``.
 """
 
@@ -30,6 +33,15 @@ HTTP_METHODS = ("get", "put", "post", "delete", "options", "head", "patch", "tra
 SENSITIVE_PARAM = re.compile(r"passw|pwd|secret|token|api.?key|apikey|access.?key|session|sid$|auth|credential|"
                              r"ssn|credit.?card|card.?number|cvv|iban|private", re.I)
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2, "info": 3}
+
+
+def _list(value):
+    """The value if it is a list, else an empty list (target-controlled JSON may hold anything)."""
+    return value if isinstance(value, list) else []
+
+
+def _dict(value):
+    return value if isinstance(value, dict) else {}
 
 
 def _is_spec(data):
@@ -55,48 +67,59 @@ def _resolve(document, item, depth=0):
     return item if isinstance(item, dict) else {}
 
 
+def _valid_url(url):
+    """The URL if it parses (a malformed one such as ``http://[::1`` is dropped), else None."""
+    try:
+        parse.urlsplit(url).port  # noqa: B018 - raises ValueError for malformed hosts/ports
+        return url
+    except ValueError:
+        return None
+
+
 def _servers(document, source_url):
     """Absolute server URLs declared by the document (relative ones resolved against the source)."""
     urls = []
     if isinstance(document.get("swagger"), str):
         host = document.get("host")
-        base = document.get("basePath") or "/"
-        schemes = [s for s in document.get("schemes") or [] if isinstance(s, str)]
+        base = document.get("basePath") if isinstance(document.get("basePath"), str) else "/"
+        schemes = [s for s in _list(document.get("schemes")) if isinstance(s, str)]
         if host and isinstance(host, str):
             for scheme in schemes or [parse.urlsplit(source_url).scheme]:
                 urls.append(f"{scheme}://{host}{base}")
-        return urls
-    for server in document.get("servers") or []:
-        if isinstance(server, dict) and isinstance(server.get("url"), str):
-            urls.append(parse.urljoin(source_url, server["url"]))
-    return urls
+    else:
+        for server in _list(document.get("servers")):
+            if isinstance(server, dict) and isinstance(server.get("url"), str):
+                try:
+                    urls.append(parse.urljoin(source_url, server["url"]))
+                except ValueError:
+                    continue
+    return [u for u in urls if _valid_url(u)]
 
 
 def _schemes(document):
     if isinstance(document.get("swagger"), str):
         defs = document.get("securityDefinitions")
     else:
-        defs = (document.get("components") or {}).get("securitySchemes") if isinstance(document.get("components"), dict) \
-            else None
-    return {k: _resolve(document, v) for k, v in defs.items()} if isinstance(defs, dict) else {}
+        defs = _dict(document.get("components")).get("securitySchemes")
+    return {str(k): _resolve(document, v) for k, v in defs.items()} if isinstance(defs, dict) else {}
 
 
 def _operations(document):
-    for path, item in (document.get("paths") or {}).items():
+    for path, item in _dict(document.get("paths")).items():
         item = _resolve(document, item)
-        shared = item.get("parameters")
-        shared = list(shared) if isinstance(shared, list) else []
+        shared = list(_list(item.get("parameters")))
         for method in HTTP_METHODS:
             op = item.get(method)
             if isinstance(op, dict):
-                own = op.get("parameters")
-                own = list(own) if isinstance(own, list) else []
+                own = list(_list(op.get("parameters")))
                 params = [_resolve(document, p) for p in shared + own if isinstance(p, dict)]
                 yield str(path), method.upper(), op, params
 
 
 def analyze(document, source_url):
     """Findings, checks and inventory for an already decoded OpenAPI/Swagger document."""
+    if not isinstance(document, dict):
+        return _not_evaluated(source_url, tr("The document is not an OpenAPI/Swagger JSON object"))
     findings, checks = [], {}
     target = evidence.redact_url(source_url)
     spec_path = parse.urlsplit(source_url).path or "/"
@@ -112,7 +135,7 @@ def analyze(document, source_url):
         checks[cid] = {"id": cid, "state": state, "evidence": kind, **({"detail": detail} if detail else {})}
 
     version = document.get("openapi") or document.get("swagger")
-    info = document.get("info") if isinstance(document.get("info"), dict) else {}
+    info = _dict(document.get("info"))
     servers = _servers(document, source_url)
     schemes = _schemes(document)
     global_security = document.get("security")
@@ -163,7 +186,7 @@ def analyze(document, source_url):
             inventory.append({"method": method, "path": path[:300],
                               "operation_id": str(op.get("operationId") or "")[:120] or None,
                               "deprecated": op.get("deprecated") is True, "secured": secured,
-                              "tags": [str(t)[:60] for t in op.get("tags") or [] if isinstance(t, str)][:5]})
+                              "tags": [str(t)[:60] for t in _list(op.get("tags")) if isinstance(t, str)][:5]})
     if not operations:
         check("operation_security", "not_applicable")
     elif unsecured:

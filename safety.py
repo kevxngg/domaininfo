@@ -60,13 +60,35 @@ def _host(value):
 
 
 normalize_host = _host
+_ENCODED_DOT_OR_SLASH = re.compile(r"%2[ef]", re.I)
+
+
+def remove_dot_segments(path):
+    """RFC 3986 section 5.2.4: resolve "." and ".." segments of an absolute path."""
+    output = []
+    segments = path.split("/")[1:] if path.startswith("/") else path.split("/")
+    for index, segment in enumerate(segments):
+        last = index == len(segments) - 1
+        if segment == ".":
+            if last:
+                output.append("")
+        elif segment == "..":
+            if output:
+                output.pop()
+            if last:
+                output.append("")
+        else:
+            output.append(segment)
+    return "/" + "/".join(output)
 
 
 def normalize_url(value):
     """Canonical HTTP/HTTPS URL that keeps the path and the query.
 
     Without a scheme, https is assumed. Rejects credentials, spaces, control characters,
-    other schemes and ports outside 1–65535.
+    other schemes, ports outside 1–65535 and a percent-encoded dot or slash in the path
+    (%2e, %2f); "." and ".." path segments are resolved, so a prefix check on the result
+    cannot be escaped with dot-segments.
     """
     value = (value or "").strip()
     if not value or any(ord(c) < 33 or ord(c) == 127 for c in value):
@@ -93,7 +115,9 @@ def normalize_url(value):
     netloc = "[" + host + "]" if ":" in host else host
     if port and port != (443 if scheme == "https" else 80):
         netloc += f":{port}"
-    return parse.urlunsplit((scheme, netloc, parts.path or "/", parts.query, ""))
+    if _ENCODED_DOT_OR_SLASH.search(parts.path):
+        raise ValueError(tr("Percent-encoded dot or slash in the URL path is not accepted"))
+    return parse.urlunsplit((scheme, netloc, remove_dot_segments(parts.path or "/"), parts.query, ""))
 
 
 def classify_ip(address):
@@ -324,12 +348,20 @@ def _abort(connection):
             pass
 
 
+def _check_allowed(url, allow):
+    """Raise ScopeError when the caller's ``allow(url)`` callback refuses ``url``."""
+    if allow is not None and not allow(url):
+        raise ScopeError(tr("The URL is outside the authorized URL prefixes"))
+
+
 def http_get(url, policy, timeout, limit=MAX_BODY, headers=None, max_redirects=MAX_REDIRECTS,
-             insecure_tls=False, deadline=None):
+             insecure_tls=False, deadline=None, allow=None):
     """GET with manual redirects inside the scope. Never raises for blocked redirects: it stops
     and marks them with ``blocked`` in the chain. It does raise ScopeError if the initial URL is
-    not allowed. ``deadline`` (time.monotonic) limits the total time; OSError when it runs out."""
+    not allowed. ``deadline`` (time.monotonic) limits the total time; OSError when it runs out.
+    ``allow(url) -> bool`` (optional) is checked on every hop before connecting."""
     current = normalize_url(url)
+    _check_allowed(current, allow)
     deadline = time.monotonic() + DEFAULT_DEADLINE if deadline is None else deadline
     chain = []
     seen = set()
@@ -346,6 +378,7 @@ def http_get(url, policy, timeout, limit=MAX_BODY, headers=None, max_redirects=M
                     raise ScopeError(tr("Too many redirects or a redirect loop"))
                 if parse.urlsplit(current).scheme == "https" and parse.urlsplit(nxt).scheme == "http":
                     entry["downgrade"] = True
+                _check_allowed(nxt, allow)
                 policy.connect_address(parse.urlsplit(nxt).hostname)
             except (ScopeError, ValueError) as exc:
                 entry.setdefault("location", location[:300])
@@ -561,14 +594,17 @@ def encode_form(data):
 
 
 def http_request(method, url, policy, timeout, data=None, jar=None, limit=MAX_BODY, headers=None,
-                 max_redirects=MAX_REDIRECTS, insecure_tls=False, deadline=None, budget=None):
+                 max_redirects=MAX_REDIRECTS, insecure_tls=False, deadline=None, budget=None, allow=None):
     """GET, HEAD or POST (form-encoded ``data``) with the rules of ``http_get``.
 
     ``jar`` (``CookieJar``) receives the cookies of every hop and supplies the matching ones; it
     is never written anywhere. ``budget`` (``RequestBudget``) is charged once per hop. A
     301/302/303 after a POST continues as a GET without body; a 307/308 keeps the POST only
     inside the same origin (scheme, host and port) and is blocked otherwise. Caller-supplied
-    ``Cookie``, ``Host`` and ``Content-Length`` headers are ignored.
+    ``Cookie``, ``Host`` and ``Content-Length`` headers are ignored. ``allow(url) -> bool``
+    (optional) is checked on every hop, the first one included, before connecting: a refused
+    redirect is marked ``blocked`` and not followed. With a ``jar``, an HTTPS to HTTP redirect
+    is refused (not only flagged) so that session cookies never travel in clear text.
     """
     method = (method or "").upper()
     if method not in METHODS:
@@ -577,6 +613,7 @@ def http_request(method, url, policy, timeout, data=None, jar=None, limit=MAX_BO
         raise ValueError(tr("Only POST requests carry a body"))
     body = encode_form(data or {}) if method == "POST" else None
     current = normalize_url(url)
+    _check_allowed(current, allow)
     deadline = time.monotonic() + DEFAULT_DEADLINE if deadline is None else deadline
     base_headers = {k: v for k, v in (headers or {}).items()
                     if k.lower() not in ("cookie", "host", "content-length", "content-type")}
@@ -605,6 +642,9 @@ def http_request(method, url, policy, timeout, data=None, jar=None, limit=MAX_BO
                     raise ScopeError(tr("Too many redirects or a redirect loop"))
                 if parse.urlsplit(current).scheme == "https" and parse.urlsplit(nxt).scheme == "http":
                     entry["downgrade"] = True
+                    if jar is not None:
+                        raise ScopeError(tr("Redirect from HTTPS to HTTP refused while session cookies are in use"))
+                _check_allowed(nxt, allow)
                 if method == "POST" and status in (307, 308) and _origin(nxt) != _origin(current):
                     raise ScopeError(tr("A POST body is never re-sent to another origin"))
                 policy.connect_address(parse.urlsplit(nxt).hostname)

@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
 import socket
+import sys
 from urllib import error, parse, request
 
 import dnsclient
@@ -75,8 +76,11 @@ def from_ct(domain, timeout):
 
 
 def from_wordlist(domain, threads, timeout):
-    path = Path(__file__).resolve().parent / "wordlists" / "subdomains.txt"
-    if not path.exists():
+    # Next to the code in a clone; under <prefix>/share/domaininfo when installed with pip/pipx
+    candidates = (Path(__file__).resolve().parent / "wordlists" / "subdomains.txt",
+                  Path(sys.prefix) / "share" / "domaininfo" / "wordlists" / "subdomains.txt")
+    path = next((p for p in candidates if p.is_file()), None)
+    if path is None:
         return []
     words = [w.strip().lower() for w in path.read_text(encoding="utf-8", errors="replace").splitlines()
              if w.strip() and not w.startswith("#")][:2000]

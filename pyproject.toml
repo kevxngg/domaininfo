@@ -1,5 +1,6 @@
 # Installs the portable Python core as the `domaininfo` command:
 #   pipx install git+https://github.com/kevxngg/domaininfo
+#   pipx install "domaininfo[server] @ git+https://github.com/kevxngg/domaininfo"   # + Security Center
 # The classic Bash modules need a clone of the repository.
 [build-system]
 requires = ["setuptools>=61"]
@@ -7,20 +8,33 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "domaininfo"
-version = "6.0.0a1"
-description = "Auditoría de dominios, infraestructura y aplicaciones web para Termux, Kali/Linux, macOS y Windows"
+version = "6.0.0"
+description = "Security suite for domains, infrastructure and web applications: OSINT, web security, sessions, external tools, CVE intelligence and a local Security Center. Runs on Termux, Linux, macOS and Windows."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Kevin Hernández (kevxngg)" }]
-keywords = ["osint", "dns", "rdap", "tls", "dmarc", "spf", "subdomains", "typosquatting", "network-diagnostics",
-            "routeros", "termux", "web-security", "csp", "csrf", "cors"]
+keywords = ["osint", "security", "web-security", "dns", "rdap", "tls", "dmarc", "spf", "subdomains", "csp",
+            "csrf", "cors", "cve", "attack-surface", "routeros", "termux"]
 classifiers = [
     "Environment :: Console",
+    "Environment :: Web Environment",
+    "Intended Audience :: System Administrators",
+    "Intended Audience :: Information Technology",
+    "Natural Language :: English",
+    "Natural Language :: Spanish",
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
+    "Topic :: Security",
     "Topic :: System :: Networking :: Monitoring",
 ]
+# The core has no dependencies; everything else is optional.
+dependencies = []
+
+[project.optional-dependencies]
+server = ["fastapi>=0.110", "uvicorn>=0.29"]
+browser = ["playwright>=1.40"]
+dev = ["hypothesis", "ruff", "bandit", "pyright", "pip-audit"]
 
 [project.urls]
 Homepage = "https://github.com/kevxngg/domaininfo"
@@ -29,18 +43,23 @@ Author = "https://kevxngg.github.io/"
 [project.scripts]
 domaininfo = "domaininfo:entry"
 
-# El núcleo no tiene dependencias. Solo para desarrollo y CI:
-[project.optional-dependencies]
-dev = ["hypothesis", "ruff", "bandit", "pyright", "pip-audit"]
-
 [tool.setuptools]
 py-modules = ["domaininfo", "terminal_ui", "routeros", "report", "traceroute", "completions",
               "dnsclient", "mailsec", "netinfo", "tlsdeep", "webtech", "recon", "history",
-              "lookalike", "score", "infra", "render", "safety", "evidence", "webapp", "tools"]
+              "lookalike", "score", "infra", "render", "safety", "evidence", "webapp", "tools",
+              "authscope", "session_audit", "apispec", "zapclient", "browser",
+              "runners", "vulnintel", "inventory", "auditstore", "exporters", "server",
+              "i18n", "i18n_es_ui", "i18n_es_cli", "i18n_es_modules", "i18n_es_phase2", "i18n_es_phase3",
+              "i18n_es_phase4"]
+
+[tool.setuptools.data-files]
+"share/domaininfo/webui" = ["webui/dist/index.html", "webui/dist/favicon.svg"]
+"share/domaininfo/webui/assets" = ["webui/dist/assets/*"]
+"share/domaininfo/wordlists" = ["wordlists/*"]
 
 [tool.ruff]
 target-version = "py310"
 line-length = 120
 
 [tool.bandit]
-exclude_dirs = ["tests"]
+exclude_dirs = ["tests", "webui"]

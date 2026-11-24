@@ -2,7 +2,8 @@
 
 Public API::
 
-    runners.run(tool, target, options=None, allow_active=False, scope=None, cancel=None) -> dict
+    runners.run(tool, target, options=None, allow_active=False, scope=None, cancel=None,
+                allow_private=False) -> dict
     runners.describe() -> dict          # static metadata of every supported tool
     runners.is_active(tool, options=None) -> bool
     runners.in_scope(host, scope) -> bool
@@ -19,6 +20,13 @@ Rules enforced here:
 * ACTIVE tools (they send traffic to the target: nmap, nuclei, testssl.sh, sslyze, httpx probing and dnsx
   brute force) only run when the caller passes ``allow_active=True`` AND the target host is in the explicit
   ``scope`` list (exact host, ``*.domain`` wildcard, IP or CIDR).
+* Every tool that connects to the target (host, URL) refuses it when its name resolves to a
+  link-local / metadata / multicast / reserved address, and to a private address unless
+  ``allow_private=True`` (``safety.classify_ip``). The external tool resolves the name again by itself, so
+  DNS rebinding between this check and the tool's own lookup is a residual gap. Domain-only tools
+  (subfinder, amass, dnsx) query DNS and public sources, not the target, and are not resolved here.
+* Windows script shims (``.bat``, ``.cmd``, ``.ps1``) are never executed: their arguments would pass through
+  ``cmd.exe``, which interprets ``& | " ^ %``.
 * Every run has a timeout and an optional ``threading.Event`` for cancellation; both kill the whole
   process tree. Output is capped and temporary files live in a private directory removed afterwards.
 
@@ -26,7 +34,6 @@ The result dict always has: ``tool, target, status (ok|error|skipped), reason, a
 version, install, command, returncode, duration, findings, assets, components, errors, coverage``.
 """
 
-import hashlib
 import ipaddress
 import json
 import os
@@ -807,7 +814,9 @@ def _build_httpx(ctx):
 
 
 def _build_whatweb(ctx):
+    # Never follow redirects: a redirect could point WhatWeb at an internal or out-of-scope address.
     return [ctx.exe, "--aggression", "1", "--color=never", "--no-errors", "--max-threads", "2",
+            "--follow-redirect=never", "--max-redirects=0",
             "--open-timeout", "10", "--read-timeout", "20", f"--log-json={ctx.out}", ctx.target]
 
 
@@ -933,6 +942,35 @@ def _validate_target(kind, target):
     return validate_path(target, {"dir": "dir", "file": "file"}.get(kind, "any"))
 
 
+NETWORK_KINDS = ("host", "url", "url_or_host")
+UNSAFE_SUFFIXES = (".bat", ".cmd", ".ps1")
+
+
+def check_address(host, allow_private=False):
+    """None when ``host`` may be contacted, else ``(reason_code, message)``. Every address the name
+    resolves to must be public (or private with ``allow_private``); blocked addresses are never allowed."""
+    import safety
+    try:
+        addresses = safety.resolve_host(host)
+    except (OSError, UnicodeError, ValueError) as exc:
+        return "unresolved", tr("Could not resolve {host}: {error}", host=host, error=clean(exc, 120))
+    if not addresses:
+        return "unresolved", tr("{host} has no addresses", host=host)
+    kinds = set()
+    for address in addresses:
+        try:
+            kinds.add(safety.classify_ip(address))
+        except ValueError:
+            kinds.add("blocked")
+    if "blocked" in kinds:
+        return "blocked_address", tr("{host} resolves to a blocked address (link-local, multicast or reserved)",
+                                     host=host)
+    if "private" in kinds and not allow_private:
+        return "private_address", tr("{host} resolves to an internal network; use --allow-private if authorized",
+                                     host=host)
+    return None
+
+
 def _error(result, code, message, status="error"):
     result["status"], result["reason"] = status, code
     result["errors"].append({"code": code, "message": message})
@@ -944,12 +982,15 @@ def _command_view(argv, tmp):
     return [os.path.basename(arg) if i == 0 else arg.replace(tmp, "<tmp>") for i, arg in enumerate(argv)]
 
 
-def run(tool, target, options=None, allow_active=False, scope=None, cancel=None, timeout=None):
+def run(tool, target, options=None, allow_active=False, scope=None, cancel=None, timeout=None,
+        allow_private=False):
     """Run one optional tool safely and return a normalized result dict (never raises for tool problems).
 
     ``options`` per tool: nmap ``ports`` ("22,80,443" / "1-1024") or ``top_ports``; nuclei ``tags`` and
     ``rate``; httpx/dnsx ``rate``; sslyze/testssl.sh ``port``; dnsx ``names`` (list) or ``wordlist`` (active);
     semgrep ``config`` (``p/<ruleset>`` or a local rules file); gitleaks ``git_history``; all ``timeout``.
+    ``allow_private`` lets network tools reach private (RFC 1918, loopback...) addresses; link-local and
+    cloud-metadata addresses are always refused.
     """
     options = dict(options or {})
     result = {"tool": tool, "target": clean(target, 300), "status": "ok", "reason": None, "active": False,
@@ -977,6 +1018,10 @@ def run(tool, target, options=None, allow_active=False, scope=None, cancel=None,
                               "skipped")
     except TargetError as exc:
         return _error(result, "invalid_input", str(exc))
+    if kind in NETWORK_KINDS:
+        refused = check_address(_host_of(target) or "", allow_private)
+        if refused:
+            return _error(result, refused[0], refused[1], "skipped")
     if cancel is not None and cancel.is_set():
         return _error(result, "cancelled", tr("Cancelled before start"), "skipped")
 
@@ -993,6 +1038,11 @@ def run(tool, target, options=None, allow_active=False, scope=None, cancel=None,
         return _error(result, "incompatible", tr("{tool} {version} is older than the supported minimum {minimum}",
                                                  tool=tool, version=info.get("version"),
                                                  minimum=info.get("minimum")), "skipped")
+    if str(info.get("path") or "").lower().endswith(UNSAFE_SUFFIXES):
+        return _error(result, "unsafe_executable", tr("{tool} is installed as a script shim ({path}); it is not run "
+                                                      "because cmd.exe would interpret its arguments. Install the "
+                                                      "native executable", tool=tool,
+                                                      path=os.path.basename(str(info.get("path")))), "skipped")
 
     tmp = tempfile.mkdtemp(prefix="domaininfo-")  # private (0700) directory
     try:

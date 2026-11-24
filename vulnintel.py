@@ -25,6 +25,7 @@ Only fixed HTTPS endpoints are contacted; responses have size caps and timeouts.
 """
 
 import hashlib
+import http.client
 import json
 import math
 import os
@@ -152,7 +153,8 @@ def _http(url, body=None, headers=None, timeout=20, limit=1024 * 1024):
             raw = response.read(limit + 1)
     except error.HTTPError as exc:
         raise SourceError(tr("HTTP {status} from {url}", status=exc.code, url=base)) from exc
-    except (error.URLError, OSError, ValueError) as exc:
+    except (error.URLError, OSError, ValueError, http.client.HTTPException) as exc:
+        # HTTPException (e.g. IncompleteRead) is not an OSError and must not escape the scan
         raise SourceError(tr("Request to {url} failed: {error}", url=base, error=str(exc)[:150])) from exc
     if len(raw) > limit:
         raise SourceError(tr("Response from {url} exceeds {size} bytes", url=base, size=limit))

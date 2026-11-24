@@ -1,6 +1,6 @@
 # DomainInfo 6.0 Security Suite — design and roadmap
 
-Status: **all four phases are being implemented in 6.0** on the `feature/v6-fase1-webapp` branch. Phase 1 is implemented; phases 2–4 are in progress.
+Status: **all four phases are implemented in DomainInfo 6.0.** Module guides: [AUTHENTICATED_AUDIT.md](AUTHENTICATED_AUDIT.md), [INTEGRATIONS.md](INTEGRATIONS.md), [SECURITY_CENTER.md](SECURITY_CENTER.md), [I18N.md](I18N.md).
 
 ## 1. Starting point (DomainInfo 5.0)
 
@@ -94,9 +94,9 @@ Scores (`report["assessment"]`):
 | Phase | Content | Status |
 |---|---|---|
 | 1 — Solid foundation | Full URL, passive `webapp`, forms/CSRF, cookies, CSP, CORS, errors, exposed secrets, evidence model, new scoring, scope policy, tool detection | **Done** |
-| 2 — Advanced security | Sessions with test accounts (authorization file + limits), passive ZAP, optional Playwright, OpenAPI analysis, service inventory | In progress (6.0) |
-| 3 — Integrations | Runners for Nmap, Nuclei, SSLyze, testssl.sh, Subfinder, httpx…; OSV/NVD/KEV with cache; version-based CVE correlation; history and comparisons | In progress (6.0) |
-| 4 — Security Center | Optional FastAPI on 127.0.0.1 with a token, SQLite, React+TS dashboard, PDF/CSV, packaging | In progress (6.0) |
+| 2 — Advanced security | Sessions with test accounts (authorization file + limits), passive ZAP, optional Playwright, OpenAPI analysis, service inventory | **Done** |
+| 3 — Integrations | Runners for Nmap, Nuclei, SSLyze, testssl.sh, Subfinder, httpx…; OSV/NVD/KEV with cache; version-based CVE correlation; history and comparisons | **Done** |
+| 4 — Security Center | Optional FastAPI on 127.0.0.1 with a token, SQLite, React+TS dashboard, PDF/CSV, packaging | **Done** |
 
 ### Decisions for the following phases
 

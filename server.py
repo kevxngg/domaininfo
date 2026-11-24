@@ -66,8 +66,8 @@ class MissingExtra(RuntimeError):
 
 def require_extra():
     try:
-        import fastapi  # noqa: F401
-        import uvicorn  # noqa: F401
+        import fastapi  # noqa: F401  # pyright: ignore[reportMissingImports]
+        import uvicorn  # noqa: F401  # pyright: ignore[reportMissingImports]
     except ImportError as exc:
         raise MissingExtra(tr("The Security Center needs the optional web extra. Install it with: {hint}",
                               hint=INSTALL_HINT)) from exc
@@ -366,8 +366,8 @@ def section_facts(report, section):
 def create_app(store, token, hosts, webui_dir=None, scanner=None, tools_detect=None):
     """FastAPI application. ``hosts`` is the Host allow-list; ``scanner``/``tools_detect`` are injectable."""
     require_extra()
-    from fastapi import FastAPI, Request
-    from fastapi.responses import JSONResponse, Response
+    from fastapi import FastAPI, Request  # pyright: ignore[reportMissingImports]
+    from fastapi.responses import JSONResponse, Response  # pyright: ignore[reportMissingImports]
 
     import exporters
 
@@ -403,7 +403,11 @@ def create_app(store, token, hosts, webui_dir=None, scanner=None, tools_detect=N
             if request.method in ("POST", "PATCH", "DELETE"):
                 limit = MAX_IMPORT if path.endswith("/import") else MAX_BODY
                 length = request.headers.get("content-length")
-                if length is None and request.headers.get("transfer-encoding"):
+                if request.headers.get("transfer-encoding") and length is not None:
+                    # Both framing headers at once is a request-smuggling pattern
+                    response = error(400, tr("Conflicting Content-Length and Transfer-Encoding headers"))
+                elif request.headers.get("transfer-encoding"):
+                    # Chunked bodies could skip the size limit
                     response = error(411, tr("Content-Length is required"))
                 elif length is not None and (not length.isdigit() or int(length) > limit):
                     response = error(413, tr("Request body too large"))
@@ -416,8 +420,12 @@ def create_app(store, token, hosts, webui_dir=None, scanner=None, tools_detect=N
         return response
 
     async def body(request, required=()):
+        raw = await request.body()
+        # The declared Content-Length was checked by the middleware; check the bytes actually received too
+        if len(raw) > (MAX_IMPORT if request.url.path.endswith("/import") else MAX_BODY):
+            raise ValueError(tr("Request body too large"))
         try:
-            data = json.loads((await request.body()) or b"{}")
+            data = json.loads(raw or b"{}")
         except (ValueError, UnicodeDecodeError):
             data = None
         if not isinstance(data, dict):
@@ -711,7 +719,7 @@ def create_app(store, token, hosts, webui_dir=None, scanner=None, tools_detect=N
 def serve(host=DEFAULT_HOST, port=DEFAULT_PORT, open_browser=True, allow_remote=False, db_path=None):
     """Run the Security Center until CTRL+C. Refuses non-loopback addresses unless ``allow_remote``."""
     require_extra()
-    import uvicorn
+    import uvicorn  # pyright: ignore[reportMissingImports]
 
     from auditstore import AuditStore
     if not is_loopback(host) and not allow_remote:

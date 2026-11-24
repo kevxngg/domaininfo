@@ -11,8 +11,13 @@ enabled (``args.zap_spider``), waits for the passive scan queue to drain (with a
 reads the alerts for in-scope URLs. It never starts an active scan: only the API endpoints in
 ``ALLOWED_ENDPOINTS`` can be called.
 
-Alerts become ``evidence`` findings: status ``confirmed`` only for ZAP confidence High or
-Confirmed, ``likely`` for Medium and ``pending`` for Low; False Positive alerts are dropped.
+Alerts become ``evidence`` findings: status ``confirmed`` only for alerts a person marked Confirmed in
+ZAP, ``likely`` for ZAP confidence High or Medium (scanner rules still need a manual check) and
+``pending`` for Low; False Positive alerts are dropped.
+
+ZAP resolves the target name by itself, so DNS rebinding between DomainInfo's check and ZAP's own
+lookup is a residual gap; DomainInfo refuses targets that resolve to internal or blocked addresses
+(unless ``allow_private``) before asking ZAP to visit them.
 
 Public API: ``available(zap_url=None, api_key=None, timeout=5) -> dict`` and ``audit(url, args) -> dict``.
 """
@@ -35,7 +40,7 @@ ALLOWED_ENDPOINTS = frozenset({
     "core/view/alerts", "spider/action/scan", "spider/view/status",
 })
 RISK = {"high": "high", "medium": "medium", "low": "low", "informational": "info", "info": "info"}
-CONFIDENCE = {"confirmed": ("confirmed", "high"), "high": ("confirmed", "high"), "medium": ("likely", "medium"),
+CONFIDENCE = {"confirmed": ("confirmed", "high"), "high": ("likely", "high"), "medium": ("likely", "medium"),
               "low": ("pending", "low")}
 MAX_ALERTS = 500
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2, "info": 3}

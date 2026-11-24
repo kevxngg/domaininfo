@@ -89,7 +89,8 @@ class AuthScope:
     lockout_account: object = None
 
     def in_targets(self, url):
-        """True when ``url`` starts with one of the authorized prefixes (scheme, host, port and path)."""
+        """True when ``url`` (normalized, dot-segments resolved) lies under one of the authorized
+        prefixes (scheme, host, port and path on a segment boundary)."""
         try:
             url = safety.normalize_url(url)
         except ValueError:
@@ -134,6 +135,14 @@ def _short(url):
 
 
 def _prefix_match(url, prefix):
+    """``url`` lies under ``prefix``: same scheme, host and port, and the path continues the
+    prefix on a segment boundary (``/app`` covers ``/app`` and ``/app/x``, never ``/application``).
+    Both are normalized first, so dot-segments (``/app/../admin``) cannot escape the prefix and
+    percent-encoded dots or slashes are refused."""
+    try:
+        url, prefix = safety.normalize_url(url), safety.normalize_url(prefix)
+    except ValueError:
+        return False
     a, b = parse.urlsplit(url), parse.urlsplit(prefix)
     if (a.scheme, a.netloc) != (b.scheme, b.netloc):
         return False
