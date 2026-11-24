@@ -74,6 +74,13 @@ DISABLE_WEBSOCKETS = ("(() => { const blocked = function () { throw new Error('W
                       " Object.defineProperty(window, 'WebSocket', {value: blocked, writable: false}); })();")
 
 
+# Web Workers can open sockets and requests that page-level routing may not see; the audit does not need
+# them, so the audited page cannot create any (service workers are blocked by the context option).
+DISABLE_WORKERS = ("(() => { for (const name of ['Worker', 'SharedWorker']) { const blocked = function () {"
+                   " throw new Error(name + ' disabled by DomainInfo'); };"
+                   " Object.defineProperty(window, name, {value: blocked, writable: false}); } })();")
+
+
 def resolver_rules(policy):
     """Chromium ``--host-resolver-rules`` mapping each known in-scope name to its pinned IP; every
     other name fails to resolve (so DNS rebinding cannot redirect the browser)."""
@@ -175,6 +182,7 @@ def audit(url, args):
                     websocket_guard["active"] = True
                 else:
                     context.add_init_script(DISABLE_WEBSOCKETS)
+                context.add_init_script(DISABLE_WORKERS)
                 page = context.new_page()
                 page.on("console", on_console)
                 page.on("pageerror", on_page_error)

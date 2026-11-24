@@ -255,6 +255,15 @@ class BrowserWebSocketTests(unittest.TestCase):
         self.assertEqual(states["websocket_guard"], "ok")
         self.assertTrue(any("10.0.0.5" in b["url"] for b in result["blocked_requests"]))
 
+    def test_workers_are_disabled_in_every_mode(self):
+        # Sockets and requests from Web Workers might escape the page-level filters: no workers at all
+        for with_api in (True, False):
+            context = FakeContext(with_api, [])
+            with patch.object(browser, "_load", return_value=fake_playwright(context)):
+                browser.audit(f"http://{PUBLIC}/", opts())
+            with self.subTest(with_api=with_api):
+                self.assertTrue(any("SharedWorker" in s and "'Worker'" in s for s in context.init_scripts))
+
     def test_without_route_web_socket_guard_is_not_evaluated(self):
         context = FakeContext(False, [])
         with patch.object(browser, "_load", return_value=fake_playwright(context)):
