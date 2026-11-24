@@ -39,59 +39,174 @@ In a real terminal just **press the option's key**, no ENTER needed (`DOMAININFO
 
 DomainInfo speaks **English** by default. Spanish is built in: `--lang es`, `DOMAININFO_LANG=es` or *Preferences → Language* in the menu. JSON keys and enumerated values (severities, statuses…) are always English, so scripts work the same in both languages ([docs/I18N.md](docs/I18N.md)).
 
-## Installation
+## Installation and first steps
 
-### As a command with pipx (Linux, macOS, Windows and Termux)
+You only need **Python 3.10 or newer** and **Git**. Pick your system and follow the steps in order. Every system ends the same way: `--doctor` to check, the menu, a first audit, Spanish if you want it, and the optional Security Center.
 
-```bash
-pipx install git+https://github.com/kevxngg/domaininfo
-domaininfo --doctor
-domaininfo example.com
-```
+| | Windows 10/11 | macOS | Linux / Kali | Termux (Android) |
+|---|---|---|---|---|
+| Terminal | PowerShell | Terminal (zsh) | Terminal (bash) | Termux |
+| Run it as | `python domaininfo.py` or `.\domaininfo.cmd` | `domaininfo` (after `install.sh`) | `domaininfo` (after `install.sh`) | `domaininfo` (after `install.sh`) |
+| Language | `setx DOMAININFO_LANG es` | `~/.zshrc` | `~/.bashrc` | `~/.bashrc` |
 
-Optional extras: `pipx install "domaininfo[server] @ git+https://github.com/kevxngg/domaininfo"` adds the Security Center (FastAPI + Uvicorn); `[browser]` adds Playwright (then run `playwright install chromium`). Update with `pipx upgrade domaininfo`. A single-file `domaininfo.pyz` is also built by the *Package* workflow (`python domaininfo.pyz example.com`).
+### Windows 10/11 (PowerShell)
 
-### Termux
+1. **Install Python and Git** (skip what you already have). Either with winget:
 
-```bash
-pkg update
-pkg install git python
-cd "$HOME"
-git clone https://github.com/kevxngg/domaininfo.git
-cd domaininfo
-bash install.sh
-domaininfo --doctor
-```
+   ```powershell
+   winget install Python.Python.3.13
+   winget install Git.Git
+   ```
 
-Work inside `$HOME` instead of Android shared storage. The installer uses `$PREFIX/bin`, never sudo, and does not upgrade pip. If `pkg` fails, check the visible error, the connection and the mirrors with `termux-change-repo`.
+   or from [python.org](https://www.python.org/downloads/) (tick **"Add python.exe to PATH"**) and [git-scm.com](https://git-scm.com/download/win). Then **close PowerShell and open a new window**.
+2. **Check Python**: `python --version` must print 3.10 or newer. If it opens the Microsoft Store instead, use `py` in place of `python` in every command below (or turn off *Settings → Apps → Advanced app settings → App execution aliases → python.exe*).
+3. **Download DomainInfo** into your user folder:
 
-### Kali and other Linux distributions
+   ```powershell
+   cd $HOME
+   git clone https://github.com/kevxngg/domaininfo.git
+   cd domaininfo
+   ```
 
-```bash
-git clone https://github.com/kevxngg/domaininfo.git
-cd domaininfo
-bash install.sh
-python3 domaininfo.py --doctor
-```
+4. **Check that everything works** (no network scan): `python domaininfo.py --doctor`
+5. **Open the menu**: `python domaininfo.py` — press the key of an option (no ENTER); `0` goes back or exits.
+6. **Run audits directly**:
 
-The installer detects apt, dnf or pacman when Python is missing. The `domaininfo` command goes to `~/.local/bin`; add it to PATH if needed. Do not run the whole application with sudo.
+   ```powershell
+   python domaininfo.py example.com                              # quick analysis
+   python domaininfo.py -m web example.com --open                # website + TLS, opens the HTML report
+   python domaininfo.py -m webapp --url https://example.com/login
+   python domaininfo.py --tools                                  # optional external tools
+   ```
+
+   Reports are saved in the `logs` folder inside `domaininfo`. `.\domaininfo.cmd` works the same as `python domaininfo.py`.
+7. **Spanish**: add `--lang es` to any command, or make it permanent with `setx DOMAININFO_LANG es` and open a new PowerShell window.
+8. **Security Center (optional)**:
+
+   ```powershell
+   python -m pip install fastapi uvicorn
+   python domaininfo.py --serve
+   ```
+
+   Your browser opens `http://127.0.0.1:8765` with a private token. Keep that PowerShell window open while you use it and press **CTRL+C** to stop it. Save CLI audits into it with `--store "My project"`.
+9. **Update**: `cd $HOME\domaininfo` and then `python domaininfo.py --update` (it runs `git pull`).
+
+You do not need `install.ps1` (it only checks Python) and you never need to change the PowerShell execution policy.
 
 ### macOS
 
-Install Python 3.10+ (for example `brew install python`), clone the repository and run `bash install.sh`. The portable core does not depend on the system's Bash 3.2 or GNU tools.
+1. **Install the tools**: open *Terminal* and run `xcode-select --install` (Git) and, if you use [Homebrew](https://brew.sh), `brew install python`. Otherwise install Python from [python.org](https://www.python.org/downloads/macos/). Check with `python3 --version` (3.10 or newer).
+2. **Download and install**:
 
-### Windows (PowerShell or CMD)
+   ```bash
+   cd ~
+   git clone https://github.com/kevxngg/domaininfo.git
+   cd domaininfo
+   bash install.sh
+   ```
 
-Install Python 3.10+ (with the PATH option) and Git, then open a new terminal:
+   The installer creates the `domaininfo` command in `~/.local/bin`. If `domaininfo` is "not found", run once:
+   `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc`
+3. **Check**: `domaininfo --doctor`
+4. **Use it**: `domaininfo` (menu), `domaininfo example.com`, `domaininfo -m web example.com --open`. Reports go to `logs` in the folder where you run it.
+5. **Spanish**: `--lang es`, or permanently `echo 'export DOMAININFO_LANG=es' >> ~/.zshrc && source ~/.zshrc`.
+6. **Security Center (optional)**: Homebrew's Python does not allow global `pip install`, so use a virtual environment inside the folder:
 
-```powershell
-git clone https://github.com/kevxngg/domaininfo.git
-cd domaininfo
-python domaininfo.py --doctor
-.\domaininfo.cmd example.com
-```
+   ```bash
+   cd ~/domaininfo
+   python3 -m venv .venv
+   .venv/bin/pip install fastapi uvicorn
+   .venv/bin/python domaininfo.py --serve
+   ```
 
-`py -3 domaininfo.py example.com` also works. The optional `install.ps1` only checks Python and runs the diagnostics. If PowerShell blocks scripts, just use `python domaininfo.py`; there is no need to change the execution policy.
+7. **Update**: `domaininfo --update`.
+
+The portable core does not need the system's old Bash 3.2 or GNU tools.
+
+### Linux (Kali, Ubuntu, Debian, Fedora, Arch…)
+
+1. **Install the tools** if they are missing:
+   - Debian/Ubuntu/Kali: `sudo apt update && sudo apt install -y git python3 python3-venv`
+   - Fedora: `sudo dnf install -y git python3`
+   - Arch: `sudo pacman -S --needed git python`
+2. **Download and install** (as your normal user, **not** with sudo):
+
+   ```bash
+   cd ~
+   git clone https://github.com/kevxngg/domaininfo.git
+   cd domaininfo
+   bash install.sh
+   ```
+
+   The command is created in `~/.local/bin`. If `domaininfo` is "not found":
+   `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc`
+3. **Check**: `domaininfo --doctor`
+4. **Use it**: `domaininfo` (menu), `domaininfo example.com`, `domaininfo -m full example.com`.
+5. **Spanish**: `--lang es`, or permanently `echo 'export DOMAININFO_LANG=es' >> ~/.bashrc && source ~/.bashrc`.
+6. **Security Center (optional)**: recent distributions block global `pip install` ("externally-managed-environment"), so use a virtual environment:
+
+   ```bash
+   cd ~/domaininfo
+   python3 -m venv .venv
+   .venv/bin/pip install fastapi uvicorn
+   .venv/bin/python domaininfo.py --serve
+   ```
+
+7. **Classic Bash modules (optional)**: `bash install.sh --legacy` installs curl, dig, whois, Nmap, OpenSSL… with your package manager (it asks for sudo for that step only). Then `bash domaininfo.sh --legacy`.
+8. **Update**: `domaininfo --update`.
+
+### Termux (Android)
+
+1. Install **Termux** (the F-Droid or GitHub builds are the recommended ones), open it and run:
+
+   ```bash
+   pkg update
+   pkg install git python
+   ```
+
+   If `pkg` fails, choose another mirror with `termux-change-repo`.
+2. **Download and install** inside your Termux home (not in Android shared storage):
+
+   ```bash
+   cd "$HOME"
+   git clone https://github.com/kevxngg/domaininfo.git
+   cd domaininfo
+   bash install.sh
+   ```
+
+   The command goes to `$PREFIX/bin`; no root or sudo is used.
+3. **Check**: `domaininfo --doctor`
+4. **Use it**: `domaininfo` (the menu adapts to the narrow screen), `domaininfo example.com`.
+5. **Spanish**: `--lang es`, or permanently `echo 'export DOMAININFO_LANG=es' >> ~/.bashrc` and reopen Termux.
+6. **Classic Bash modules (optional)**: `bash install.sh --legacy` installs their packages with `pkg`.
+7. **Update**: `domaininfo --update`.
+
+The Security Center needs FastAPI, whose dependencies have to be compiled on Android; it is not tested on Termux. Everything else works with Termux's Python alone.
+
+### Other ways to install
+
+- **As a global command with pipx** (any system): `pipx install git+https://github.com/kevxngg/domaininfo`, or with the Security Center: `pipx install "domaininfo[server] @ git+https://github.com/kevxngg/domaininfo"`. Then just `domaininfo --serve`. Update with `pipx upgrade domaininfo`.
+- **Single file**: download `domaininfo.pyz` from the [latest release](https://github.com/kevxngg/domaininfo/releases/latest) and run `python domaininfo.pyz example.com` (Windows) or `python3 domaininfo.pyz example.com`.
+
+### Optional extras
+
+| Extra | Install | Used by |
+|---|---|---|
+| Security Center | `pip install fastapi uvicorn` (or `domaininfo[server]`) | `--serve`, menu key `x` |
+| Browser rendering | `pip install playwright` then `python -m playwright install chromium` | `-m browser` |
+| External tools | see `--tools` (Nmap, Nuclei, Semgrep, Trivy…) | `--tool`, `-m code` |
+| OWASP ZAP | [zaproxy.org](https://www.zaproxy.org/download/), started by you in daemon mode | `-m zap` |
+
+### Common mistakes
+
+| You see | Fix |
+|---|---|
+| `unrecognized arguments: --server` | The option is `--serve` |
+| `domaininfo: command not found` | Run it as `python3 domaininfo.py` from the folder, or add `~/.local/bin` to PATH (steps above) |
+| `python` opens the Microsoft Store | Use `py`, or disable the *App execution aliases* for Python |
+| `externally-managed-environment` when using pip | Use the virtual environment (`python3 -m venv .venv`) or pipx |
+| `The Security Center needs the optional web extra` | Install FastAPI and Uvicorn in the same Python you run DomainInfo with |
+| Output in English | Add `--lang es` or set `DOMAININFO_LANG=es` |
 
 ## Audit modes
 

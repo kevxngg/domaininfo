@@ -25,7 +25,7 @@ AWS_KEY = "AKIAIOSFODNN7EXAMPLE"
 try:
     from fastapi.testclient import TestClient
     HAVE_FASTAPI = True
-except ImportError:  # the extra is optional: the server tests are skipped
+except (ImportError, RuntimeError):  # optional extra (newer Starlette raises RuntimeError without its test client)
     HAVE_FASTAPI = False
 
 
@@ -263,7 +263,12 @@ class ServerHelpersTests(unittest.TestCase):
         self.assertNotIn("evil.example:8765", hosts)
 
     def test_serve_refuses_remote_by_default(self):
-        if not HAVE_FASTAPI:
+        try:
+            server.require_extra()  # FastAPI may be installed without its test client
+            extra = True
+        except server.MissingExtra:
+            extra = False
+        if not extra:
             with self.assertRaises(server.MissingExtra):
                 server.serve("0.0.0.0", open_browser=False)  # noqa: S104
             return

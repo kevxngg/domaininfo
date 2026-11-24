@@ -337,7 +337,7 @@ class VulnIntelHttpTests(unittest.TestCase):
 try:
     from fastapi.testclient import TestClient
     HAVE_FASTAPI = True
-except ImportError:
+except (ImportError, RuntimeError):  # newer Starlette raises RuntimeError when its test client is missing
     HAVE_FASTAPI = False
 
 
