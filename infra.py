@@ -1,11 +1,16 @@
-"""Mapa de infraestructura entre varios objetivos y exportación CSV/Markdown.
+"""Infrastructure map across several targets and CSV/Markdown export.
 
-Agrupa qué objetivos comparten IP, red (ASN), servidores DNS, servidores de correo,
-certificado o favicon: útil para descubrir activos relacionados.
+Groups the targets that share an IP, network (ASN), DNS servers, mail servers,
+certificate or favicon: useful to discover related assets.
+
+Group ``kind`` values are English (IP, Network (ASN), DNS server, Mail server, Certificate,
+Favicon); the Markdown map translates them.
 """
 
 import csv
 import io
+
+from i18n import tr
 
 
 def _data(report, name):
@@ -18,17 +23,17 @@ def facts(report):
     records = dns.get("records") or {}
     return {
         "IP": set(dns.get("addresses", [])),
-        "Red (ASN)": {f"AS{r['asn']} {r.get('as_name') or ''}".strip() for r in asn.get("networks", []) if r.get("asn")},
-        "Servidor DNS": set(records.get("NS", [])),
-        "Servidor de correo": {r["host"] for r in records.get("MX", []) if isinstance(r, dict)}
+        "Network (ASN)": {f"AS{r['asn']} {r.get('as_name') or ''}".strip() for r in asn.get("networks", []) if r.get("asn")},
+        "DNS server": set(records.get("NS", [])),
+        "Mail server": {r["host"] for r in records.get("MX", []) if isinstance(r, dict)}
         | {r["host"] for r in mail.get("mx", []) if isinstance(r, dict)},
-        "Certificado": {f"{tls.get('issuer')} #{tls.get('serial')}"} if tls.get("serial") else set(),
+        "Certificate": {f"{tls.get('issuer')} #{tls.get('serial')}"} if tls.get("serial") else set(),
         "Favicon": {str(tech["favicon"]["mmh3"])} if tech.get("favicon") else set(),
     }
 
 
 def correlate(reports):
-    """{"groups": [{"kind", "value", "targets"}]} solo con valores compartidos por 2+ objetivos."""
+    """{"groups": [{"kind", "value", "targets"}]} only with values shared by 2+ targets."""
     index = {}
     for report in reports:
         target = report.get("meta", {}).get("target")
@@ -45,29 +50,29 @@ def summary_row(report):
     dns, tls, mail, ports, subs, http, tech = (_data(report, n) for n in
                                                ("dns", "tls", "mail", "ports", "subdomains", "http", "tech"))
     score = report.get("score") or {}
-    return {"objetivo": report.get("meta", {}).get("target"), "nota": score.get("grade", ""),
-            "puntos": score.get("score", ""), "ips": " ".join(dns.get("addresses", [])),
+    return {"target": report.get("meta", {}).get("target"), "grade": score.get("grade", ""),
+            "points": score.get("score", ""), "ips": " ".join(dns.get("addresses", [])),
             "http": tech.get("status") or http.get("status") or "",
-            "tls_valido": "" if not tls else ("sí" if tls.get("verified") else "no"),
-            "tls_caduca": tls.get("expires", ""), "correo": mail.get("grade", ""),
-            "suplantable": "" if not mail else ("sí" if mail.get("spoofable") else "no"),
-            "puertos_abiertos": " ".join(str(r["port"]) for r in ports.get("results", []) if r.get("state") == "open"),
-            "subdominios": subs.get("total", ""), "takeover": len(subs.get("takeover", [])) if subs else ""}
+            "tls_valid": "" if not tls else ("yes" if tls.get("verified") else "no"),
+            "tls_expires": tls.get("expires", ""), "mail": mail.get("grade", ""),
+            "spoofable": "" if not mail else ("yes" if mail.get("spoofable") else "no"),
+            "open_ports": " ".join(str(r["port"]) for r in ports.get("results", []) if r.get("state") == "open"),
+            "subdomains": subs.get("total", ""), "takeover": len(subs.get("takeover", [])) if subs else ""}
 
 
 def to_csv(reports):
     rows = [summary_row(r) for r in reports]
     buffer = io.StringIO()
-    writer = csv.DictWriter(buffer, fieldnames=list(rows[0]) if rows else ["objetivo"])
+    writer = csv.DictWriter(buffer, fieldnames=list(rows[0]) if rows else ["target"])
     writer.writeheader()
     writer.writerows(rows)
     return buffer.getvalue()
 
 
 def map_markdown(result):
-    lines = ["# Mapa de infraestructura", "", "Objetivos: " + ", ".join(result["targets"]), ""]
+    lines = [tr("# Infrastructure map"), "", tr("Targets: {targets}", targets=", ".join(result["targets"])), ""]
     if not result["groups"]:
-        lines.append("No se encontraron elementos compartidos entre los objetivos.")
+        lines.append(tr("No shared elements were found between the targets."))
     for group in result["groups"]:
-        lines.append(f"- **{group['kind']}** `{group['value']}` → " + ", ".join(group["targets"]))
+        lines.append(f"- **{tr(group['kind'])}** `{group['value']}` → " + ", ".join(group["targets"]))
     return "\n".join(lines) + "\n"

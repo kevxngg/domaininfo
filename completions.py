@@ -26,7 +26,7 @@ def bash(cli):
     cases = "\n".join(f'        {option}) COMPREPLY=($(compgen -W "{" ".join(values)}" -- "$cur")); return ;;'
                       for option, values in sorted(choices.items()))
     files = "|".join(FILE_OPTIONS)
-    return f"""# DomainInfo: autocompletado para Bash
+    return f"""# DomainInfo: Bash completion
 _domaininfo() {{
     local cur prev
     cur="${{COMP_WORDS[COMP_CWORD]}}"
@@ -44,7 +44,7 @@ complete -o default -F _domaininfo {" ".join(COMMANDS)}"""
 
 def zsh(cli):
     # bashcompinit lets zsh reuse the Bash function without a second definition to maintain.
-    return ("# DomainInfo: autocompletado para Zsh\n"
+    return ("# DomainInfo: Zsh completion\n"
             "(( $+functions[compdef] )) || { autoload -U +X compinit && compinit; }\n"
             "autoload -U +X bashcompinit && bashcompinit\n" + bash(cli))
 
@@ -53,7 +53,7 @@ def powershell(cli):
     options, choices = _spec(cli)
     quoted = lambda values: ", ".join("'" + value + "'" for value in values)
     table = "\n".join(f"        '{option}' = @({quoted(values)})" for option, values in sorted(choices.items()))
-    return f"""# DomainInfo: autocompletado para PowerShell
+    return f"""# DomainInfo: PowerShell completion
 Register-ArgumentCompleter -Native -CommandName {", ".join(COMMANDS)} -ScriptBlock {{
     param($wordToComplete, $commandAst, $cursorPosition)
     $choices = @{{

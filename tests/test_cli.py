@@ -8,7 +8,12 @@ from unittest.mock import patch
 
 import completions
 import domaininfo as app
+import i18n
 from terminal_ui import Back, InteractiveApp, service_label
+
+
+def setUpModule():
+    i18n.set_language("en")
 
 
 class TTY(io.StringIO):
@@ -37,7 +42,7 @@ class OutputTests(unittest.TestCase):
         out = TTY()
         self.assertEqual(self.run_main(["localhost", "-s", "rdap"], out), 0)
         text = out.getvalue()
-        self.assertIn("Direcciones:", text)
+        self.assertIn("Addresses:", text)
         self.assertIn("--json", text)
         self.assertNotIn('"modules":', text)
 
@@ -61,12 +66,38 @@ class OutputTests(unittest.TestCase):
 
 
 class HelpAndCompletionTests(unittest.TestCase):
-    def test_help_is_spanish_with_examples(self):
+    def tearDown(self):
+        i18n.set_language("en")
+
+    def test_help_is_english_with_examples(self):
         text = app.parser().format_help()
-        for expected in ("uso: domaininfo", "ejemplos:", "--watch", "--completion", "por defecto: quick"):
+        for expected in ("usage: domaininfo", "examples:", "--watch", "--completion", "--lang {en,es}",
+                         "default: quick"):
             self.assertIn(expected, text)
-        self.assertNotIn("show this help", text)
+        self.assertNotIn("show this help message", text)  # our own wording, not argparse's
         self.assertNotIn("-j ", text)
+
+    def test_lang_es_gives_spanish_help(self):
+        with contextlib.redirect_stdout(io.StringIO()) as out, self.assertRaises(SystemExit):
+            app.main(["--lang", "es", "--help"])
+        for expected in ("uso: domaininfo", "ejemplos:", "muestra esta ayuda y sale", "por defecto: quick"):
+            self.assertIn(expected, out.getvalue())
+
+    def test_lang_es_gives_spanish_menu(self):
+        i18n.set_language("es")
+        out = io.StringIO()
+        InteractiveApp(app, app.parser().parse_args([]), input_fn=lambda: "0", output=out).run()
+        self.assertIn("MENÚ PRINCIPAL", out.getvalue())
+        self.assertIn("Preferencias", out.getvalue())
+
+    def test_language_can_be_changed_in_preferences(self):
+        answers = iter(["l", "2", "0"])
+        out = io.StringIO()
+        ui = InteractiveApp(app, app.parser().parse_args([]), input_fn=lambda: next(answers), output=out)
+        ui.preferences(ui.defaults)
+        self.assertEqual(i18n.language(), "es")
+        self.assertIn("Language: English", out.getvalue())
+        self.assertIn("Idioma: Español", out.getvalue())
 
     def test_completion_scripts_list_options_and_values(self):
         cli = app.parser()
@@ -97,23 +128,23 @@ class CertificateTests(unittest.TestCase):
         self.assertIsNone(app.expiry_warning(None))
 
     def test_summary_flags_expired_and_soon_certificates(self):
-        self.assertIn("CADUCADO hace 3 días", self.summary(fake_report(days=-3)))
-        self.assertIn("caduca en 12 días", self.summary(fake_report(days=12)))
-        self.assertIn("caduca el 2027-01-01 (200 días)", self.summary(fake_report()))
+        self.assertIn("EXPIRED 3 days ago", self.summary(fake_report(days=-3)))
+        self.assertIn("expires in 12 days", self.summary(fake_report(days=12)))
+        self.assertIn("expires on 2027-01-01 (200 days)", self.summary(fake_report()))
 
     def test_expired_certificate_error_is_explained(self):
-        self.assertIn("caducado", InteractiveApp.explain_error(
+        self.assertIn("expired", InteractiveApp.explain_error(
             "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: certificate has expired"))
 
     def test_missing_local_root_is_not_blamed_on_the_site(self):
         text = InteractiveApp.explain_error("[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: "
                                             "unable to get local issuer certificate (_ssl.c:1082)")
-        self.assertIn("almacén del sistema", text)
+        self.assertIn("system store", text)
 
     def test_ports_show_usual_service_and_closed_count(self):
         text = self.summary(fake_report(ports=(22, 443)))
-        self.assertIn("Puertos TCP accesibles: 22 (ssh), 443 (https)", text)
-        self.assertIn("Sin respuesta: 1 de 3", text)
+        self.assertIn("Reachable TCP ports: 22 (ssh), 443 (https)", text)
+        self.assertIn("No answer: 1 of 3", text)
         self.assertEqual(service_label(40000), "40000")
 
 
@@ -136,7 +167,7 @@ class WatchTests(unittest.TestCase):
         lines = [json.loads(line) for line in out.getvalue().splitlines()]
         self.assertEqual(len(lines), 2)  # first full report + one change event
         self.assertEqual(lines[1]["event"], "change")
-        self.assertIn("Puertos abiertos: 22 → 22, 80", lines[1]["changes"])
+        self.assertIn("Open ports: 22 → 22, 80", lines[1]["changes"])
 
     def test_volatile_values_are_not_changes(self):
         before, after = app.fingerprint(fake_report(days=200)), app.fingerprint(fake_report(days=199))
@@ -154,7 +185,7 @@ class UpdateTests(unittest.TestCase):
             run.return_value.returncode = 0
             self.assertEqual(app.main(["--update"]), 0)
         self.assertEqual(run.call_args[0][0][-2:], ["pull", "--ff-only"])
-        self.assertIn("última publicada: v4.3", out.getvalue())
+        self.assertIn("latest published: v4.3", out.getvalue())
 
     def test_update_without_git_explains_pipx(self):
         with patch.object(app, "latest_release", return_value=None), \
@@ -176,7 +207,7 @@ class SingleKeyMenuTests(unittest.TestCase):
     def test_valid_key_without_enter(self):
         ui, out = self.app(["x", "2"])
         self.assertEqual(ui.choose({"1", "2"}), "2")
-        self.assertIn("Opción no válida", out.getvalue())
+        self.assertIn("Invalid option", out.getvalue())
 
     def test_enter_takes_default_and_zero_goes_back(self):
         ui, _ = self.app(["\r"])

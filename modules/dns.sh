@@ -20,13 +20,13 @@ warn()    { echo -e "  ${Y}[!]${NC} $1"; }
 info()    { echo -e "  ${DIM}ℹ  $1${NC}"; }
 
 module_dns() {
-    header "1 ▸ RESOLUCIÓN DNS"
+    header "1 ▸ DNS RESOLUTION"
 
     if is_ip "$TARGET"; then
-        section "PTR — Registro inverso"
+        section "PTR — Reverse record"
         local ptr
         ptr=$(dig +short -x "$TARGET" 2>/dev/null | head -1 | sed 's/\.$//')
-        [[ -n "$ptr" ]] && kv "PTR (reverso)" "$ptr" || info "Sin PTR reverso"
+        [[ -n "$ptr" ]] && kv "PTR (reverse)" "$ptr" || info "No reverse PTR"
         IP="$TARGET"
         DOMAIN="$ptr"
         return
@@ -35,7 +35,7 @@ module_dns() {
     DOMAIN="$TARGET"
 
     # ── A records
-    section "Registros A — IPv4"
+    section "A records — IPv4"
     local ipv4_list
     ipv4_list=$(dig +short A "$DOMAIN" 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$')
     if [[ -n "$ipv4_list" ]]; then
@@ -44,41 +44,41 @@ module_dns() {
             [[ -n "$line" ]] && kv "IPv4" "$line"
         done <<< "$ipv4_list"
     else
-        fail "Sin registros A"
+        fail "No A records"
     fi
 
     # ── AAAA records
-    section "Registros AAAA — IPv6"
+    section "AAAA records — IPv6"
     local ipv6_list
     ipv6_list=$(dig +short AAAA "$DOMAIN" 2>/dev/null | grep -v "^;;")
     if [[ -n "$ipv6_list" ]]; then
         while IFS= read -r l; do [[ -n "$l" ]] && kv "IPv6" "$l"; done <<< "$ipv6_list"
     else
-        info "Sin registros AAAA"
+        info "No AAAA records"
     fi
 
     # ── MX
-    section "Registros MX — Correo"
+    section "MX records — Mail"
     local mx_list
     mx_list=$(dig +short MX "$DOMAIN" 2>/dev/null | grep -v "^;;")
     if [[ -n "$mx_list" ]]; then
         while IFS= read -r l; do [[ -n "$l" ]] && kv "MX" "$l"; done <<< "$mx_list"
     else
-        info "Sin registros MX"
+        info "No MX records"
     fi
 
     # ── NS
-    section "Registros NS — Nameservers"
+    section "NS records — Nameservers"
     local ns_list
     ns_list=$(dig +short NS "$DOMAIN" 2>/dev/null | grep -v "^;;")
     if [[ -n "$ns_list" ]]; then
         while IFS= read -r l; do [[ -n "$l" ]] && kv "NS" "$l"; done <<< "$ns_list"
     else
-        info "Sin registros NS"
+        info "No NS records"
     fi
 
     # ── TXT
-    section "Registros TXT — SPF / DKIM / Verificaciones"
+    section "TXT records — SPF / DKIM / Verifications"
     local txt_list
     txt_list=$(dig +short TXT "$DOMAIN" 2>/dev/null | grep -v "^;;")
     if [[ -n "$txt_list" ]]; then
@@ -96,14 +96,14 @@ module_dns() {
             fi
         done <<< "$txt_list"
     else
-        info "Sin registros TXT"
+        info "No TXT records"
     fi
 
     # ── CNAME
-    section "Registro CNAME"
+    section "CNAME record"
     local cname
     cname=$(dig +short CNAME "$DOMAIN" 2>/dev/null | grep -v "^;;")
-    [[ -n "$cname" ]] && kv "CNAME" "$cname" || info "Sin CNAME directo"
+    [[ -n "$cname" ]] && kv "CNAME" "$cname" || info "No direct CNAME"
 
     # ── SOA
     section "SOA — Start of Authority"
@@ -118,35 +118,35 @@ module_dns() {
         kv "Admin email (SOA)" "$admin"
         kv "Serial" "$serial"
     else
-        info "Sin SOA"
+        info "No SOA"
     fi
 
     # ── CAA
-    section "CAA — Autoridad de Certificados"
+    section "CAA — Certification Authority Authorization"
     local caa
     caa=$(dig +short CAA "$DOMAIN" 2>/dev/null | grep -v "^;;")
-    [[ -n "$caa" ]] && echo -e "  ${G}$caa${NC}" || info "Sin CAA (cualquier CA puede emitir certs)"
+    [[ -n "$caa" ]] && echo -e "  ${G}$caa${NC}" || info "No CAA (any CA may issue certificates)"
 
     # ── DMARC
-    section "DMARC — Política de correo"
+    section "DMARC — Mail policy"
     local dmarc
     dmarc=$(dig +short TXT "_dmarc.${DOMAIN}" 2>/dev/null | grep -v "^;;")
     if [[ -n "$dmarc" ]]; then
         kv "DMARC" "$dmarc"
-        echo "$dmarc" | grep -qi "p=reject" && ok "Política DMARC: REJECT (más estricta)" 
-        echo "$dmarc" | grep -qi "p=quarantine" && kv_y "Política DMARC" "quarantine"
-        echo "$dmarc" | grep -qi "p=none" && kv_r "Política DMARC" "none (no protege)"
+        echo "$dmarc" | grep -qi "p=reject" && ok "DMARC policy: REJECT (strictest)" 
+        echo "$dmarc" | grep -qi "p=quarantine" && kv_y "DMARC policy" "quarantine"
+        echo "$dmarc" | grep -qi "p=none" && kv_r "DMARC policy" "none (does not protect)"
     else
-        kv_r "DMARC" "No configurado"
+        kv_r "DMARC" "Not configured"
     fi
 
     # ── DNSKEY / DNSSEC
     section "DNSSEC"
     local dnssec
     dnssec=$(dig +short DNSKEY "$DOMAIN" 2>/dev/null | grep -v "^;;" | head -2)
-    [[ -n "$dnssec" ]] && ok "DNSSEC activo" || kv_r "DNSSEC" "No firmado (sin DNSSEC)"
+    [[ -n "$dnssec" ]] && ok "DNSSEC enabled" || kv_r "DNSSEC" "Not signed (no DNSSEC)"
 }
 
 # ════════════════════════════════════════════════════════════════════
-# MÓDULO: GEOLOCALIZACIÓN
+# MODULE: GEOLOCATION
 # ════════════════════════════════════════════════════════════════════

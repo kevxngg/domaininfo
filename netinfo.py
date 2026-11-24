@@ -1,11 +1,12 @@
-"""Red de cada dirección: sistema autónomo (ASN), bloque, país, operador y DNS inverso.
+"""Network of each address: autonomous system (ASN), prefix, country, operator and reverse DNS.
 
-Usa el servicio público de Team Cymru por DNS (TXT), sin claves ni librerías.
+Uses Team Cymru's public DNS (TXT) service, with no keys or libraries.
 """
 
 import ipaddress
 
 import dnsclient
+from i18n import tr
 
 
 def _fields(text):
@@ -17,7 +18,7 @@ def lookup(address, timeout=3.0):
     row = {"ip": str(ip), "ptr": None, "asn": None, "prefix": None, "country": None,
            "registry": None, "as_name": None}
     if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-        row["note"] = "Dirección privada o reservada: sin datos públicos de red"
+        row["note"] = tr("Private or reserved address: no public network data")
         return row
     try:
         ptr = dnsclient.values(dnsclient.reverse_name(str(ip)), "PTR", timeout)

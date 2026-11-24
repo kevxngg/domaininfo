@@ -1,16 +1,26 @@
-"""Reportes legibles: texto plano, Markdown y HTML con nota, hallazgos y detalle.
+"""Readable reports: plain text, Markdown and HTML with the grade, findings and details.
 
-Reutiliza los resúmenes del menú (terminal_ui) para que la terminal y los archivos
-digan lo mismo. El JSON completo se conserva dentro del HTML.
+Reuses the menu summaries (terminal_ui) so the terminal and the files say the same thing.
+The full JSON is kept inside the HTML. Text follows the active language (``i18n``).
 """
 
 import argparse
 import html
 import io
+import re
 
-SEVERITY = {"alta": ("ALTA", "#ef4444"), "media": ("MEDIA", "#f59e0b"),
-            "baja": ("BAJA", "#38bdf8"), "info": ("INFO", "#94a3b8")}
+import i18n
+from i18n import tr
+
+SEVERITY = {"high": ("HIGH", "#ef4444"), "medium": ("MEDIUM", "#f59e0b"),
+            "low": ("LOW", "#38bdf8"), "info": ("INFO", "#94a3b8")}
 GRADE_COLORS = {"A": "#22c55e", "B": "#84cc16", "C": "#f59e0b", "D": "#f97316", "F": "#ef4444"}
+
+
+def _severity(level):
+    """(translated label, color) of a severity; unknown values are shown as they are."""
+    label, color = SEVERITY.get(level, (str(level).upper(), "#94a3b8"))
+    return tr(label), color
 
 
 def _app(core, buffer):
@@ -23,26 +33,76 @@ def module_lines(core, name, module):
     try:
         _app(core, buffer).module_summary(name, module)
     except (TypeError, KeyError, AttributeError, ValueError):
-        return ["(resumen no disponible; consulta el JSON)"]
+        return [tr("(summary not available; see the JSON)")]
     return [line[2:] if line.startswith("  ") else line for line in buffer.getvalue().splitlines()]
 
 
 def _labels():
     from terminal_ui import MODULE_LABELS, MODULE_HELP
-    return MODULE_LABELS, MODULE_HELP
+    return ({name: tr(text) for name, text in MODULE_LABELS.items()},
+            {name: tr(text) for name, text in MODULE_HELP.items()})
+
+
+def _md(value):
+    """Escape remote text so it cannot form links, images or HTML in Markdown."""
+    return re.sub(r"([\\`*_{}\[\]()<>#|!])", r"\\\1", str(value))
+
+
+def evidence_findings(report):
+    """Findings with the evidence model from every module that produces them (webapp, auth, api, zap,
+    browser, tools, intel). They are already redacted."""
+    found = []
+    for module in (report.get("modules") or {}).values():
+        data = module.get("data") if isinstance(module, dict) else None
+        if module.get("status") == "ok" and isinstance(data, dict) and isinstance(data.get("findings"), list):
+            found += [f for f in data["findings"] if isinstance(f, dict) and f.get("status") and f.get("id")]
+    return found
+
+
+def assessment_line(report):
+    a = report.get("assessment")
+    if not isinstance(a, dict):
+        return None
+    return tr("Security {security}/100 · Coverage {coverage}% · Confidence {confidence}%",
+              security=a.get("security"), coverage=a.get("coverage"), confidence=a.get("confidence"))
+
+
+def _finding_fields(f):
+    import evidence
+    status = evidence.STATUS_LABELS.get(f["status"], f["status"])
+    confidence = f.get("confidence")
+    if confidence in ("high", "medium", "low"):
+        confidence = tr(confidence)
+    fields = [(tr("Path"), f.get("path")), (tr("Tool"), f.get("tool")), (tr("Evidence"), f.get("evidence")),
+              (tr("Impact"), f.get("impact")), (tr("Safe verification"), f.get("verification")),
+              (tr("Fix"), f.get("recommendation")), (tr("References"), ", ".join(f.get("references") or []))]
+    badge = tr("{severity} · {status} · confidence {confidence}", severity=_severity(f["severity"])[0],
+               status=tr(status), confidence=confidence)
+    return fields, badge
 
 
 def to_text(core, report, serialized=None):
     labels, _ = _labels()
     meta = report.get("meta", {})
     out = [f"DomainInfo {meta.get('version', '')} · {meta.get('target', '')}",
-           f"Fecha: {meta.get('date', '')} · modo: {meta.get('mode', '')}", ""]
+           tr("Date: {date} · mode: {mode}", date=meta.get("date", ""), mode=meta.get("mode", "")), ""]
+    line = assessment_line(report)
+    if line:
+        out += [tr("ASSESSMENT: {line}", line=line), ""]
+    findings = evidence_findings(report)
+    if findings:
+        out.append(tr("FINDINGS WITH EVIDENCE"))
+        for f in findings:
+            fields, badge = _finding_fields(f)
+            out.append(f"  {f['id']} [{badge}] {f['category']}: {f['title']}")
+            out += [f"      {name}: {value}" for name, value in fields if value]
+        out.append("")
     score = report.get("score")
     if isinstance(score, dict) and score.get("grade"):
-        out.append(f"NOTA DE SEGURIDAD: {score['grade']} ({score['score']}/100)")
+        out.append(tr("SECURITY GRADE: {grade} ({score}/100)", grade=score["grade"], score=score["score"]))
         for finding in score.get("findings", []):
-            out.append(f"  [{SEVERITY[finding['severity']][0]}] {finding['area']}: {finding['title']}")
-            out.append(f"      Cómo arreglarlo: {finding['fix']}")
+            out.append(f"  [{_severity(finding['severity'])[0]}] {tr(finding['area'])}: {finding['title']}")
+            out.append("      " + tr("How to fix: {fix}", fix=finding["fix"]))
         out.append("")
     for name, module in (report.get("modules") or {}).items():
         out.append(labels.get(name, name).upper())
@@ -57,20 +117,32 @@ def to_markdown(core, report, serialized=None):
     labels, helps = _labels()
     meta = report.get("meta", {})
     out = [f"# DomainInfo · {meta.get('target', '')}", "",
-           f"*{meta.get('date', '')} · modo `{meta.get('mode', '')}` · DomainInfo {meta.get('version', '')}*", ""]
+           "*" + tr("{date} · mode `{mode}` · DomainInfo {version}", date=meta.get("date", ""),
+                    mode=meta.get("mode", ""), version=meta.get("version", "")) + "*", ""]
     score = report.get("score")
     if isinstance(score, dict) and score.get("grade"):
-        out += [f"## Nota de seguridad: **{score['grade']}** ({score['score']}/100)", ""]
+        out += ["## " + tr("Security grade: **{grade}** ({score}/100)", grade=score["grade"], score=score["score"]), ""]
         if score.get("findings"):
-            out += ["| Nivel | Área | Hallazgo | Cómo arreglarlo |", "|---|---|---|---|"]
+            out += [tr("| Level | Area | Finding | How to fix |"), "|---|---|---|---|"]
             for f in score["findings"]:
-                cells = [SEVERITY[f["severity"]][0], f["area"], f["title"], f["fix"]]
-                out.append("| " + " | ".join(c.replace("|", "\\|") for c in cells) + " |")
+                cells = [_severity(f["severity"])[0], tr(f["area"]), f["title"], f["fix"]]
+                out.append("| " + " | ".join(_md(c) for c in cells) + " |")
             out.append("")
         out += [f"> {score.get('note', '')}", ""]
+    line = assessment_line(report)
+    if line:
+        out += [tr("**Assessment:** {line}", line=line), ""]
+    findings = evidence_findings(report)
+    if findings:
+        out += ["## " + tr("Findings with evidence"), ""]
+        for f in findings:
+            fields, badge = _finding_fields(f)
+            out += [f"### {_md(f['id'])} · {_md(f['title'])}", "", f"*{_md(badge)} · {_md(f['category'])}*", ""]
+            out += ["- **" + name + ":** " + _md(value) for name, value in fields if value]
+            out.append("")
     for name, module in (report.get("modules") or {}).items():
         out += [f"## {labels.get(name, name)}", "", f"_{helps.get(name, '')}_", ""]
-        out += [f"- {line.strip()}" for line in module_lines(core, name, module) if line.strip()]
+        out += [f"- {_md(line.strip())}" for line in module_lines(core, name, module) if line.strip()]
         out.append("")
     if not report.get("modules"):
         out += ["```json", serialized or "", "```"]
@@ -101,7 +173,7 @@ def to_html(core, report, serialized):
     labels, helps = _labels()
     meta = report.get("meta", {})
     esc = html.escape
-    parts = ["<!doctype html><html lang='es'><head><meta charset='utf-8'>",
+    parts = [f"<!doctype html><html lang='{i18n.language()}'><head><meta charset='utf-8'>",
              "<meta name='viewport' content='width=device-width,initial-scale=1'>",
              f"<title>DomainInfo · {esc(str(meta.get('target', '')))}</title><style>{CSS}</style></head><body><main>"]
     score = report.get("score") if isinstance(report.get("score"), dict) else None
@@ -109,27 +181,47 @@ def to_html(core, report, serialized):
     parts.append("<header>")
     if grade:
         parts.append(f"<div class='grade' style='background:{GRADE_COLORS.get(grade, '#94a3b8')}'>{esc(grade)}</div>")
+    subtitle = tr("{date} · mode {mode} · DomainInfo {version}", date=meta.get("date", ""),
+                  mode=meta.get("mode", ""), version=meta.get("version", ""))
+    if grade:
+        subtitle += " · " + tr("grade {grade} ({score}/100)", grade=grade, score=score["score"])
     parts.append(f"<div><h1>{esc(str(meta.get('target', '')))}</h1><div class='muted'>"
-                 f"{esc(str(meta.get('date', '')))} · modo {esc(str(meta.get('mode', '')))} · "
-                 f"DomainInfo {esc(str(meta.get('version', '')))}"
-                 + (f" · nota {esc(grade)} ({score['score']}/100)" if grade else "") + "</div></div></header>")
+                 f"{esc(subtitle)}</div></div></header>")
     if score and score.get("findings"):
-        parts.append("<section class='card'><h2>Hallazgos</h2>")
+        parts.append(f"<section class='card'><h2>{esc(tr('Findings'))}</h2>")
         for f in score["findings"]:
-            label, color = SEVERITY[f["severity"]]
-            parts.append(f"<div class='finding'><span class='badge' style='background:{color}'>{label}</span>"
-                         f"<div><b>{esc(f['area'])}</b> · {esc(f['title'])}</div>"
-                         f"<div class='fix'>Cómo arreglarlo: {esc(f['fix'])}</div></div>")
+            label, color = _severity(f["severity"])
+            fix = tr("How to fix: {fix}", fix=f["fix"])
+            parts.append(f"<div class='finding'><span class='badge' style='background:{color}'>{esc(label)}</span>"
+                         f"<div><b>{esc(tr(f['area']))}</b> · {esc(f['title'])}</div>"
+                         f"<div class='fix'>{esc(fix)}</div></div>")
         parts.append(f"<p class='muted'>{esc(score.get('note', ''))}</p></section>")
+    line = assessment_line(report)
+    findings = evidence_findings(report)
+    if line or findings:
+        parts.append(f"<section class='card'><h2>{esc(tr('Findings with evidence'))}</h2>")
+        if line:
+            parts.append(f"<p class='muted'>{esc(line)}</p>")
+        for f in findings:
+            fields, badge = _finding_fields(f)
+            label, color = _severity(f["severity"])
+            parts.append(f"<div class='finding'><span class='badge' style='background:{color}'>"
+                         f"{esc(label)}</span><div><b>{esc(f['id'])}</b> · "
+                         f"{esc(f['title'])}<div class='muted'>{esc(badge)} · {esc(f['category'])}</div></div>")
+            parts += [f"<div class='fix'><b>{esc(name)}:</b> {esc(str(value))}</div>" for name, value in fields if value]
+            parts.append("</div>")
+        parts.append("</section>")
     for name, module in (report.get("modules") or {}).items():
-        status = {"ok": "listo", "error": "error", "skipped": "omitido"}.get(module.get("status"), module.get("status"))
+        states = {"ok": "done", "error": "error", "skipped": "skipped"}
+        status = tr(states[module.get("status")]) if module.get("status") in states else module.get("status")
         parts.append(f"<section class='card'><h2>{esc(labels.get(name, name))}<span class='status'>{esc(str(status))}</span></h2>"
                      f"<div class='muted'>{esc(helps.get(name, ''))}</div><ul>")
         parts += [f"<li>{esc(line.strip())}</li>" for line in module_lines(core, name, module) if line.strip()]
         parts.append("</ul></section>")
-    parts.append("<details><summary>Datos técnicos completos (JSON)</summary><pre>"
+    parts.append(f"<details><summary>{esc(tr('Full technical data (JSON)'))}</summary><pre>"
                  + esc(serialized) + "</pre></details>")
-    parts.append("<footer>Generado con DomainInfo por @kevxngg. Los hallazgos son orientativos y se basan en "
-                 "información pública; revisa solo objetivos que tengas autorización para auditar.</footer>")
+    parts.append("<footer>" + esc(tr("Generated with DomainInfo by @kevxngg. Findings are indicative and based on "
+                                     "public information; only review targets you are authorized to audit."))
+                 + "</footer>")
     parts.append("</main></body></html>")
     return "".join(parts)

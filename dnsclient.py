@@ -1,8 +1,8 @@
-"""Cliente DNS mínimo con la biblioteca estándar: UDP, TCP y DNS sobre HTTPS.
+"""Minimal DNS client built on the standard library: UDP, TCP and DNS over HTTPS.
 
-Sin dependencias: construye y lee mensajes DNS (RFC 1035) para consultar MX, NS, TXT,
-SOA, CAA, CNAME, PTR, SRV, DS y DNSKEY. Usa los servidores del sistema y, si no
-responden (redes que bloquean el puerto 53, Android sin resolv.conf), DNS sobre HTTPS.
+No dependencies: builds and parses DNS messages (RFC 1035) to query MX, NS, TXT,
+SOA, CAA, CNAME, PTR, SRV, DS and DNSKEY. Uses the system resolvers and, when they do not
+answer (networks that block port 53, Android without resolv.conf), DNS over HTTPS.
 """
 
 import base64
@@ -13,6 +13,8 @@ import socket
 import struct
 from urllib import request
 
+from i18n import tr
+
 TYPES = {"A": 1, "NS": 2, "CNAME": 5, "SOA": 6, "PTR": 12, "MX": 15, "TXT": 16,
          "AAAA": 28, "SRV": 33, "DS": 43, "DNSKEY": 48, "CAA": 257}
 TYPE_NAMES = {value: key for key, value in TYPES.items()}
@@ -22,11 +24,11 @@ FALLBACK_SERVERS = ("1.1.1.1", "8.8.8.8")
 
 
 class DNSError(Exception):
-    """La consulta no obtuvo una respuesta válida de ningún servidor."""
+    """The query got no valid answer from any server."""
 
 
 def system_resolvers():
-    """Servidores DNS del sistema (DOMAININFO_RESOLVER tiene prioridad)."""
+    """System DNS servers (DOMAININFO_RESOLVER takes precedence)."""
     custom = os.environ.get("DOMAININFO_RESOLVER")
     if custom:
         return [item.strip() for item in custom.split(",") if item.strip()]
@@ -44,7 +46,7 @@ def system_resolvers():
                             address = ipaddress.ip_address(parts[1].split("%")[0])
                         except ValueError:
                             continue
-                        # 127.0.0.53 (systemd) suele funcionar; se conserva.
+                        # 127.0.0.53 (systemd) usually works; keep it.
                         servers.append(str(address))
         except OSError:
             continue
@@ -60,13 +62,13 @@ def encode_name(name):
             continue
         raw = label.encode("idna") if not label.isascii() else label.encode("ascii")
         if len(raw) > 63:
-            raise ValueError("Etiqueta DNS demasiado larga")
+            raise ValueError(tr("DNS label too long"))
         out += bytes([len(raw)]) + raw
     return out + b"\x00"
 
 
 def build_query(name, qtype, qid=None, dnssec=False):
-    """Mensaje de consulta con EDNS0 (respuestas UDP de hasta 1232 bytes)."""
+    """Query message with EDNS0 (UDP answers of up to 1232 bytes)."""
     qid = random.randint(0, 0xFFFF) if qid is None else qid
     code = TYPES[qtype] if isinstance(qtype, str) else qtype
     header = struct.pack(">HHHHHH", qid, 0x0100, 1, 0, 0, 1)
@@ -76,23 +78,23 @@ def build_query(name, qtype, qid=None, dnssec=False):
 
 
 def read_name(msg, offset, depth=0):
-    """Nombre en la posición dada (con punteros de compresión). Devuelve (nombre, siguiente)."""
+    """Name at the given offset (following compression pointers). Returns (name, next offset)."""
     labels = []
     jumped = False
     end = offset
     for _ in range(128):
         if offset >= len(msg):
-            raise DNSError("Nombre DNS truncado")
+            raise DNSError(tr("Truncated DNS name"))
         length = msg[offset]
         if length & 0xC0 == 0xC0:
             if offset + 1 >= len(msg):
-                raise DNSError("Puntero DNS truncado")
+                raise DNSError(tr("Truncated DNS pointer"))
             pointer = ((length & 0x3F) << 8) | msg[offset + 1]
             if not jumped:
                 end = offset + 2
             jumped = True
             if pointer >= len(msg) or depth > 20:
-                raise DNSError("Puntero DNS inválido")
+                raise DNSError(tr("Invalid DNS pointer"))
             offset = pointer
             depth += 1
             continue
@@ -103,7 +105,7 @@ def read_name(msg, offset, depth=0):
         offset += 1
         labels.append(msg[offset:offset + length].decode("ascii", "replace"))
         offset += length
-    raise DNSError("Nombre DNS demasiado largo")
+    raise DNSError(tr("DNS name too long"))
 
 
 def parse_rdata(msg, rtype, offset, length):
@@ -148,10 +150,10 @@ def parse_rdata(msg, rtype, offset, length):
 
 def parse_response(msg, qid=None):
     if len(msg) < 12:
-        raise DNSError("Respuesta DNS demasiado corta")
+        raise DNSError(tr("DNS response too short"))
     rid, flags, qdcount, ancount, nscount, arcount = struct.unpack(">HHHHHH", msg[:12])
     if qid is not None and rid != qid:
-        raise DNSError("Identificador de respuesta distinto")
+        raise DNSError(tr("Response ID does not match"))
     offset = 12
     for _ in range(qdcount):
         _, offset = read_name(msg, offset)
@@ -164,7 +166,7 @@ def parse_response(msg, qid=None):
             rtype, rclass, ttl, length = struct.unpack(">HHIH", msg[offset:offset + 10])
             offset += 10
             if offset + length > len(msg):
-                raise DNSError("Registro DNS truncado")
+                raise DNSError(tr("Truncated DNS record"))
             if rtype != 41:  # OPT
                 rows.append({"name": name, "type": TYPE_NAMES.get(rtype, str(rtype)), "ttl": ttl,
                              "value": parse_rdata(msg, rtype, offset, length)})
@@ -194,7 +196,7 @@ def _recv_exact(sock, size):
     while len(data) < size:
         chunk = sock.recv(size - len(data))
         if not chunk:
-            raise DNSError("Conexión DNS cerrada")
+            raise DNSError(tr("DNS connection closed"))
         data += chunk
     return data
 
@@ -210,11 +212,11 @@ def _doh(packet, timeout):
                 return response.read(65535), url
         except OSError as exc:
             last = exc
-    raise DNSError(f"DNS sobre HTTPS no disponible: {last}")
+    raise DNSError(tr("DNS over HTTPS unavailable: {error}", error=last))
 
 
 def query(name, qtype, timeout=3.0, servers=None, dnssec=False):
-    """Consulta un tipo de registro. Devuelve rcode, respuestas y el servidor usado."""
+    """Query one record type. Returns the rcode, the answers and the server used."""
     qid, packet = build_query(name, qtype, dnssec=dnssec)
     errors = []
     for server in servers or system_resolvers():
@@ -238,7 +240,7 @@ def query(name, qtype, timeout=3.0, servers=None, dnssec=False):
 
 
 def values(name, qtype, timeout=3.0, servers=None):
-    """Solo los valores del tipo pedido ([] si no existe el nombre o el registro)."""
+    """Only the values of the requested type ([] if the name or the record does not exist)."""
     result = query(name, qtype, timeout, servers)
     return [row["value"] for row in result.get("answers", []) if row["type"] == qtype]
 

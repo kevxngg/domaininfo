@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # ================================================================
-#  summary.sh — Resumen ejecutivo
+#  summary.sh — Executive summary
 #  DomainInfo v3.2.0 — @kevxngg (Kevin)
 # ================================================================
 # shellcheck disable=SC2034,SC1091
 
-# Colores (heredados del orquestador o redefinidos como fallback)
+# Colors (inherited from the orchestrator or redefined as a fallback)
 R='\033[0;31m';  G='\033[0;32m';  Y='\033[1;33m'
 B='\033[0;34m';  C='\033[0;36m';  M='\033[0;35m'
 W='\033[1;37m';  DIM='\033[2m';   NC='\033[0m'
 BOLD='\033[1m';  BG_R='\033[41m'; BG_G='\033[42m'; BG_Y='\033[43m'
 
-# Helpers sólo si no existen (heredados del orquestador)
+# Helpers only if they do not exist yet (inherited from the orchestrator)
 if ! declare -f header &>/dev/null; then
     header()  { local t="$1"; local p=$(( 54 - ${#t} )); echo ""; echo -e "${B}╔══════════════════════════════════════════════════════════╗${NC}"; echo -e "${B}║${W}${BOLD}  ${t}${NC}${B}$(printf '%*s' "$p" '')║${NC}"; echo -e "${B}╚══════════════════════════════════════════════════════════╝${NC}"; }
     section() { echo -e "\n${M}▶  ${W}${BOLD}$1${NC}"; echo -e "${DIM}$(printf '─%.0s' {1..58})${NC}"; }
@@ -26,29 +26,29 @@ if ! declare -f header &>/dev/null; then
 fi
 
 # ════════════════════════════════════════════════════════════════
-# MÓDULO: RESUMEN EJECUTIVO
+# MODULE: EXECUTIVE SUMMARY
 # ════════════════════════════════════════════════════════════════
 module_summary() {
-    header "✦  RESUMEN EJECUTIVO"
+    header "✦  EXECUTIVE SUMMARY"
     echo ""
-    [[ -n "$DOMAIN"      ]] && kv   "Dominio"         "$DOMAIN"
-    [[ -n "$IP"          ]] && kv   "IP principal"    "$IP"
-    [[ -n "$GEO_COUNTRY" ]] && kv   "País"            "$GEO_COUNTRY"
-    [[ -n "$GEO_CITY"    ]] && kv   "Ciudad"          "$GEO_CITY"
-    [[ -n "$GEO_ORG"     ]] && kv   "Organización"    "$GEO_ORG"
+    [[ -n "$DOMAIN"      ]] && kv   "Domain"          "$DOMAIN"
+    [[ -n "$IP"          ]] && kv   "Primary IP"      "$IP"
+    [[ -n "$GEO_COUNTRY" ]] && kv   "Country"         "$GEO_COUNTRY"
+    [[ -n "$GEO_CITY"    ]] && kv   "City"            "$GEO_CITY"
+    [[ -n "$GEO_ORG"     ]] && kv   "Organization"    "$GEO_ORG"
     [[ -n "$GEO_ISP"     ]] && kv   "ISP"             "$GEO_ISP"
     [[ -n "$GEO_ASN"     ]] && kv   "ASN"             "$GEO_ASN"
     [[ -n "$registrar"   ]] && kv   "Registrar"       "$registrar"
-    [[ -n "$created"     ]] && kv   "Dominio creado"  "$created"
-    [[ -n "$expires"     ]] && kv   "Expira"          "$expires"
+    [[ -n "$created"     ]] && kv   "Domain created"  "$created"
+    [[ -n "$expires"     ]] && kv   "Expires"         "$expires"
 
     if [[ "${LISTED:-0}" -gt 0 ]]; then
-        kv_r "Blacklists"    "$LISTED listas negras"
+        kv_r "Blacklists"    "$LISTED blacklists"
     else
-        ok "IP limpia en listas negras"
+        ok "IP clean on blacklists"
     fi
 
-    [[ "$GEO_PROXY"   == "true" ]] && kv_r "Proxy/VPN"  "Detectado"
-    [[ "$GEO_HOSTING" == "true" ]] && kv_y "Hosting/DC" "IP de datacenter"
+    [[ "$GEO_PROXY"   == "true" ]] && kv_r "Proxy/VPN"  "Detected"
+    [[ "$GEO_HOSTING" == "true" ]] && kv_y "Hosting/DC" "Datacenter IP"
     echo ""
 }

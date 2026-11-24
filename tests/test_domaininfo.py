@@ -140,7 +140,7 @@ class DomainInfoTests(unittest.TestCase):
     def test_no_fake_tcp_hops(self):
         with patch.object(legacy_trace.socket, 'gethostbyname', return_value='127.0.0.1'), patch.object(legacy_trace.socket, 'socket', side_effect=PermissionError), contextlib.redirect_stdout(io.StringIO()) as output:
             legacy_trace.traceroute('localhost')
-        self.assertIn('Sin permisos RAW', output.getvalue())
+        self.assertIn('No RAW socket permission', output.getvalue())
         self.assertNotIn('REACHED', output.getvalue())
 
     def test_report_escape_and_unique_names(self):
@@ -184,7 +184,7 @@ class DomainInfoTests(unittest.TestCase):
                 self.assertEqual(app.main(['--doctor']), 0)
             self.assertIn('python', json.loads(out.getvalue()))
 
-    @unittest.skipIf(sys.platform == 'win32', 'El instalador Bash se prueba en Unix')
+    @unittest.skipIf(sys.platform == 'win32', 'The Bash installer is tested on Unix')
     def test_termux_launcher_path_with_spaces(self):
         with tempfile.TemporaryDirectory(prefix='domaininfo space ') as directory:
             env = dict(os.environ, TERMUX_VERSION='test', PREFIX=directory)
@@ -199,7 +199,7 @@ class DomainInfoTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             log = root / 'report.txt'
-            log.write_text('Reporte: <script>x</script>\nDominio : <img src=x>\n', encoding='utf-8')
+            log.write_text('Report: <script>x</script>\nDomain : <img src=x>\n', encoding='utf-8')
             with contextlib.redirect_stdout(io.StringIO()):
                 legacy_report.generate_html(str(log), str(root / 'report.html'))
             result = (root / 'report.html').read_text(encoding='utf-8')

@@ -1,5 +1,5 @@
-"""Historia del dominio: antigüedad y caducidad del registro (RDAP), registrador y
-primera y última captura en la Wayback Machine de Internet Archive.
+"""Domain history: registration age and expiry (RDAP), registrar, and the first and
+last capture in the Internet Archive's Wayback Machine.
 """
 
 from datetime import datetime, timezone
@@ -15,7 +15,7 @@ def _date(value):
 
 
 def from_rdap(rdap):
-    """Fechas y registrador de una respuesta RDAP ya descargada."""
+    """Dates and registrar from an RDAP response that was already downloaded."""
     events = {e.get("eventAction"): e.get("eventDate") for e in rdap.get("events", []) if isinstance(e, dict)}
     now = datetime.now(timezone.utc)
     registered, expires = _date(events.get("registration")), _date(events.get("expiration"))

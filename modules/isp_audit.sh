@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ================================================================
 #  isp_audit.sh — ISP / Network Device Auditor
-#  Detecta empresa, equipo, vulnerabilidades de cualquier IP pública
-#  Autor: @kevxngg (Kevin)
+#  Detects the company, equipment and vulnerabilities of any public IP
+#  Author: @kevxngg (Kevin)
 # ================================================================
 
 R='\033[0;31m'; G='\033[0;32m'; Y='\033[1;33m'; B='\033[0;34m'
@@ -27,22 +27,22 @@ ISP_FINDINGS=()
 
 isp_add_finding() { ISP_FINDINGS+=("$1"); }
 
-# ── 1. Identificación de empresa e ISP ──────────────────────────
+# ── 1. Company and ISP identification ───────────────────────────
 isp_identify() {
     local ip="$1"
-    _h "1 ▸ IDENTIFICACIÓN DEL PROVEEDOR"
+    _h "1 ▸ PROVIDER IDENTIFICATION"
 
-    _s "Consulta a bases de datos de geolocalización"
+    _s "Querying geolocation databases"
     local data1 data2 data3
 
     # ipinfo.io
     data1=$(curl -s --max-time 8 "https://ipinfo.io/${ip}/json" 2>/dev/null)
     # ip-api.com
     data2=$(curl -s --max-time 8 "http://ip-api.com/json/${ip}?fields=status,country,regionName,city,lat,lon,isp,org,as,asname,query,proxy,hosting,mobile" 2>/dev/null)
-    # Shodan InternetDB (sin API key)
+    # Shodan InternetDB (no API key)
     data3=$(curl -s --max-time 8 "https://internetdb.shodan.io/${ip}" 2>/dev/null)
 
-    # Extraer datos
+    # Extract data
     local org isp asn country city lat lon hostname
     org=$(echo "$data1" | grep -o '"org": *"[^"]*"' | cut -d'"' -f4)
     hostname=$(echo "$data1" | grep -o '"hostname": *"[^"]*"' | cut -d'"' -f4)
@@ -56,47 +56,47 @@ isp_identify() {
     is_hosting=$(echo "$data2" | grep -o '"hosting":[^,}]*' | cut -d: -f2)
     is_proxy=$(echo "$data2" | grep -o '"proxy":[^,}]*' | cut -d: -f2)
 
-    _kv  "IP Analizada"        "$ip"
-    [[ -n "$org"      ]] && _kv  "Organización"        "$org"
-    [[ -n "$isp"      ]] && _kv  "ISP / Proveedor"     "$isp"
+    _kv  "Analyzed IP"         "$ip"
+    [[ -n "$org"      ]] && _kv  "Organization"        "$org"
+    [[ -n "$isp"      ]] && _kv  "ISP / Provider"      "$isp"
     [[ -n "$asn"      ]] && _kv  "ASN"                 "$asn"
-    [[ -n "$country"  ]] && _kv  "País"                "$country"
-    [[ -n "$city"     ]] && _kv  "Ciudad"              "$city"
-    [[ -n "$lat"      ]] && _kv  "Coordenadas"         "${lat}, ${lon}"
+    [[ -n "$country"  ]] && _kv  "Country"             "$country"
+    [[ -n "$city"     ]] && _kv  "City"                "$city"
+    [[ -n "$lat"      ]] && _kv  "Coordinates"         "${lat}, ${lon}"
     [[ -n "$hostname" ]] && _kv  "Hostname"            "$hostname"
-    [[ "$is_hosting" == "true" ]] && _kvy "Tipo"       "Datacenter / Hosting"
-    [[ "$is_proxy"   == "true" ]] && _kvy "Proxy/VPN"  "Detectado"
+    [[ "$is_hosting" == "true" ]] && _kvy "Type"       "Datacenter / Hosting"
+    [[ "$is_proxy"   == "true" ]] && _kvy "Proxy/VPN"  "Detected"
 
-    # Puertos y CPEs desde Shodan InternetDB
-    _s "Datos Shodan InternetDB (sin API key)"
+    # Ports and CPEs from Shodan InternetDB
+    _s "Shodan InternetDB data (no API key)"
     local shodan_ports shodan_vulns shodan_cpes
     shodan_ports=$(echo "$data3" | grep -o '"open_ports":\[[^]]*\]' | grep -oE '[0-9]+' | tr '\n' ', ')
     shodan_vulns=$(echo "$data3" | grep -o '"vulns":\[[^]]*\]' | grep -oE 'CVE-[^"]+' | head -10)
     shodan_cpes=$(echo "$data3" | grep -o '"cpes":\[[^]]*\]' | grep -oE 'cpe:[^"]+' | head -5)
 
     if [[ -n "$shodan_ports" ]]; then
-        _kvy "Puertos vistos en Shodan" "${shodan_ports%, }"
+        _kvy "Ports seen on Shodan" "${shodan_ports%, }"
     else
-        _info "No hay datos previos en Shodan InternetDB"
+        _info "No previous data in Shodan InternetDB"
     fi
 
     if [[ -n "$shodan_vulns" ]]; then
         while IFS= read -r cve; do
-            [[ -n "$cve" ]] && _vuln "CVE conocido: $cve"
-            isp_add_finding "CRITICO: $cve detectado en Shodan"
+            [[ -n "$cve" ]] && _vuln "Known CVE: $cve"
+            isp_add_finding "CRITICAL: $cve detected on Shodan"
             ((ISP_RISK+=15))
         done <<< "$shodan_vulns"
     fi
 
     if [[ -n "$shodan_cpes" ]]; then
-        _s "CPEs (equipos identificados por Shodan)"
+        _s "CPEs (equipment identified by Shodan)"
         while IFS= read -r cpe; do
-            [[ -n "$cpe" ]] && _kvy "Equipo" "$cpe"
+            [[ -n "$cpe" ]] && _kvy "Equipment" "$cpe"
         done <<< "$shodan_cpes"
     fi
 
-    # WHOIS para más info de la empresa
-    _s "WHOIS — Información del bloque IP"
+    # WHOIS for more company info
+    _s "WHOIS — IP block information"
     local whois_data
     whois_data=$(whois "$ip" 2>/dev/null | head -40)
     local netname netrange descr abuse
@@ -105,24 +105,24 @@ isp_identify() {
     descr=$(echo "$whois_data" | grep -i "^descr:\|^OrgName:" | head -1 | awk -F: '{print $2}' | xargs)
     abuse=$(echo "$whois_data" | grep -i "abuse\|OrgAbuseEmail" | grep "@" | head -1 | awk '{print $NF}')
 
-    [[ -n "$netname"  ]] && _kv "Nombre de red (WHOIS)" "$netname"
-    [[ -n "$netrange" ]] && _kv "Rango IP asignado"     "$netrange"
-    [[ -n "$descr"    ]] && _kv "Descripción"           "$descr"
-    [[ -n "$abuse"    ]] && _kv "Email abuso"           "$abuse"
+    [[ -n "$netname"  ]] && _kv "Network name (WHOIS)"  "$netname"
+    [[ -n "$netrange" ]] && _kv "Assigned IP range"     "$netrange"
+    [[ -n "$descr"    ]] && _kv "Description"           "$descr"
+    [[ -n "$abuse"    ]] && _kv "Abuse email"           "$abuse"
 
     ISP_ORG="${isp:-${org:-$netname}}"
     ISP_COUNTRY="$country"
     ISP_CITY="$city"
 }
 
-# ── 2. Detección de equipo y fabricante ─────────────────────────
+# ── 2. Equipment and vendor detection ───────────────────────────
 isp_device_detect() {
     local ip="$1"
-    _h "2 ▸ DETECCIÓN DE EQUIPO Y FABRICANTE"
+    _h "2 ▸ EQUIPMENT AND VENDOR DETECTION"
 
     local device_vendor="" device_model="" device_os=""
 
-    # Banner grabbing en puertos comunes
+    # Banner grabbing on common ports
     _s "Banner grabbing (HTTP, SSH, Telnet, FTP)"
 
     # HTTP banner
@@ -134,8 +134,8 @@ isp_device_detect() {
             local server
             server=$(echo "$banner" | grep -i "^server:" | cut -d: -f2- | xargs)
             if [[ -n "$server" ]]; then
-                _kv "Servidor HTTP:${port}" "$server"
-                # Detectar fabricante por server header
+                _kv "HTTP server:${port}" "$server"
+                # Detect vendor from the Server header
                 if echo "$server" | grep -qi "mikrotik\|routeros"; then
                     device_vendor="MikroTik"; device_os="RouterOS"
                     local ver; ver=$(echo "$server" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?')
@@ -162,7 +162,7 @@ isp_device_detect() {
             elif echo "$body" | grep -qi "cisco ios\|cisco systems"; then
                 device_vendor="Cisco"
             elif echo "$body" | grep -qi "huawei.*router\|hg8\|ont\|onu"; then
-                device_vendor="Huawei"; device_model="Posible ONT/ONU/HG"
+                device_vendor="Huawei"; device_model="Possible ONT/ONU/HG"
             elif echo "$body" | grep -qi "ubiquiti\|airmax\|airfiber"; then
                 device_vendor="Ubiquiti"
             elif echo "$body" | grep -qi "tenda\|tendacn"; then
@@ -186,7 +186,7 @@ isp_device_detect() {
             elif echo "$ssh_banner" | grep -qi "junos"; then
                 device_vendor="Juniper"; device_os="JunOS"
             elif echo "$ssh_banner" | grep -qi "dropbear"; then
-                device_vendor="Desconocido"; device_os="Linux/Dropbear"
+                device_vendor="Unknown"; device_os="Linux/Dropbear"
             elif echo "$ssh_banner" | grep -qi "huawei\|vrp"; then
                 device_vendor="Huawei"; device_os="VRP"
             fi
@@ -206,17 +206,17 @@ isp_device_detect() {
         fi
     fi
 
-    # SNMP community string 'public' check (UDP 161) — si snmpwalk disponible
+    # SNMP community string 'public' check (UDP 161) — if snmpwalk is available
     if command -v snmpwalk &>/dev/null; then
         _s "SNMP — sysDescr (UDP 161)"
         local snmp_desc
         snmp_desc=$(timeout 5 snmpwalk -v2c -c public -t 3 "$ip" sysDescr 2>/dev/null | head -3)
         if [[ -n "$snmp_desc" ]]; then
-            _vuln "SNMP community 'public' aceptado — expone información del sistema"
+            _vuln "SNMP community 'public' accepted — exposes system information"
             echo "$snmp_desc" | while IFS= read -r l; do _kvy "SNMP sysDescr" "$l"; done
-            isp_add_finding "CRITICO: SNMP con community 'public' accesible (info leak)"
+            isp_add_finding "CRITICAL: SNMP with community 'public' reachable (info leak)"
             ((ISP_RISK+=25))
-            # Extraer info del equipo
+            # Extract equipment info
             echo "$snmp_desc" | grep -qi "mikrotik\|routeros" && device_vendor="MikroTik"
             echo "$snmp_desc" | grep -qi "cisco"              && device_vendor="Cisco"
             echo "$snmp_desc" | grep -qi "huawei"             && device_vendor="Huawei"
@@ -225,62 +225,62 @@ isp_device_detect() {
             extracted_model=$(echo "$snmp_desc" | grep -oE 'RouterOS [0-9.]+|IOS [0-9.]+|VRP [^,]+' | head -1)
             [[ -n "$extracted_model" ]] && device_model="$extracted_model"
         else
-            _ok "SNMP community 'public' no accesible (bien)"
+            _ok "SNMP community 'public' not reachable (good)"
         fi
     fi
 
-    # Resultado de detección
-    _s "Resultado de fingerprinting"
+    # Detection result
+    _s "Fingerprinting result"
     if [[ -n "$device_vendor" ]]; then
-        _kvy "Fabricante detectado" "$device_vendor"
-        [[ -n "$device_model" ]] && _kvy "Modelo/Versión" "$device_model"
-        [[ -n "$device_os"    ]] && _kvy "Sistema Operativo" "$device_os"
+        _kvy "Detected vendor" "$device_vendor"
+        [[ -n "$device_model" ]] && _kvy "Model/Version" "$device_model"
+        [[ -n "$device_os"    ]] && _kvy "Operating system" "$device_os"
         ISP_DEVICE="$device_vendor ${device_model}"
     else
-        _info "Fabricante no identificado por análisis de banners"
-        _info "Prueba con nmap -sV para fingerprinting más profundo"
-        ISP_DEVICE="Desconocido"
+        _info "Vendor not identified from banner analysis"
+        _info "Try nmap -sV for deeper fingerprinting"
+        ISP_DEVICE="Unknown"
     fi
 }
 
-# ── 3. Escaneo de puertos con análisis de acceso ─────────────────
+# ── 3. Port scan with access analysis ────────────────────────────
 isp_ports() {
     local ip="$1"
-    _h "3 ▸ PUERTOS — ANÁLISIS DE ACCESO Y RIESGO"
+    _h "3 ▸ PORTS — ACCESS AND RISK ANALYSIS"
 
-    # Mapa de puertos críticos para equipos de red/ISP
+    # Map of critical ports for network/ISP equipment
     declare -A PORT_INFO=(
-        [21]="FTP — transferencia archivos (inseguro)"
-        [22]="SSH — administración remota"
-        [23]="Telnet — admin en texto plano (PELIGROSO)"
-        [25]="SMTP — servidor de correo"
-        [53]="DNS — servidor de nombres"
-        [69]="TFTP — transferencia sin auth"
-        [80]="HTTP — panel web sin cifrar"
-        [161]="SNMP UDP — gestión red (potencialmente expuesto)"
-        [443]="HTTPS — panel web cifrado"
-        [445]="SMB — recursos compartidos Windows"
-        [554]="RTSP — streaming multimedia"
-        [1723]="PPTP VPN — protocolo VPN (inseguro)"
+        [21]="FTP — file transfer (insecure)"
+        [22]="SSH — remote administration"
+        [23]="Telnet — plain-text admin (DANGEROUS)"
+        [25]="SMTP — mail server"
+        [53]="DNS — name server"
+        [69]="TFTP — transfer without auth"
+        [80]="HTTP — unencrypted web panel"
+        [161]="SNMP UDP — network management (possibly exposed)"
+        [443]="HTTPS — encrypted web panel"
+        [445]="SMB — Windows file shares"
+        [554]="RTSP — media streaming"
+        [1723]="PPTP VPN — VPN protocol (insecure)"
         [2000]="Bandwidth Test (MikroTik)"
         [2601]="Zebra/Quagga — routing daemon"
-        [3128]="Proxy HTTP (Squid)"
-        [3306]="MySQL — base de datos"
-        [4899]="Radmin — control remoto"
-        [5900]="VNC — escritorio remoto"
+        [3128]="HTTP proxy (Squid)"
+        [3306]="MySQL — database"
+        [4899]="Radmin — remote control"
+        [5900]="VNC — remote desktop"
         [6881]="BitTorrent"
-        [7547]="TR-069 — gestión CPE (CWMP)"
-        [8080]="HTTP Alternativo"
-        [8081]="HTTP Alternativo 2"
+        [7547]="TR-069 — CPE management (CWMP)"
+        [8080]="Alternative HTTP"
+        [8081]="Alternative HTTP 2"
         [8291]="Winbox (MikroTik)"
         [8333]="WebFig (MikroTik)"
-        [8443]="HTTPS Alternativo"
-        [8728]="API MikroTik sin TLS"
-        [8729]="API MikroTik con TLS"
-        [8888]="Panel administración genérico"
-        [9000]="Panel administración alternativo"
-        [9090]="Panel web / Prometheus"
-        [10000]="Webmin — panel administración"
+        [8443]="Alternative HTTPS"
+        [8728]="MikroTik API without TLS"
+        [8729]="MikroTik API with TLS"
+        [8888]="Generic admin panel"
+        [9000]="Alternative admin panel"
+        [9090]="Web panel / Prometheus"
+        [10000]="Webmin — admin panel"
     )
 
     declare -A PORT_RISK=(
@@ -290,26 +290,26 @@ isp_ports() {
     )
 
     local open_ports=()
-    _s "Escaneando puertos de administración y riesgo"
+    _s "Scanning administration and risky ports"
     echo ""
-    printf "  ${W}${BOLD}%-8s %-35s %-12s %s${NC}\n" "PUERTO" "SERVICIO" "ESTADO" "RIESGO"
+    printf "  ${W}${BOLD}%-8s %-35s %-12s %s${NC}\n" "PORT" "SERVICE" "STATE" "RISK"
     echo -e "  ${DIM}$(printf '─%.0s' {1..70})${NC}"
 
     for port in 21 22 23 25 53 69 80 161 443 445 554 1723 2000 2601 3128 3306 4899 5900 7547 8080 8081 8291 8333 8443 8728 8729 8888 9000 9090 10000; do
-        local service="${PORT_INFO[$port]:-Servicio desconocido}"
+        local service="${PORT_INFO[$port]:-Unknown service}"
         local risk_add="${PORT_RISK[$port]:-0}"
         local state
 
         if timeout 2 bash -c "echo >/dev/tcp/$ip/$port" 2>/dev/null; then
-            state="ABIERTO"
+            state="OPEN"
             open_ports+=("$port")
 
-            # Determinar nivel de riesgo por puerto
+            # Determine the risk level per port
             local risk_level color_risk
             case $port in
-                23|69|4899)      risk_level="CRITICO"; color_risk="${R}" ;;
-                21|161|5900|7547|8291|8728) risk_level="ALTO"; color_risk="${Y}" ;;
-                22|80|3306|10000) risk_level="MEDIO";  color_risk="${C}" ;;
+                23|69|4899)      risk_level="CRITICAL"; color_risk="${R}" ;;
+                21|161|5900|7547|8291|8728) risk_level="HIGH"; color_risk="${Y}" ;;
+                22|80|3306|10000) risk_level="MEDIUM"; color_risk="${C}" ;;
                 *)               risk_level="INFO";   color_risk="${G}" ;;
             esac
 
@@ -317,45 +317,45 @@ isp_ports() {
                    "$port" "$service" "$state" "$risk_level"
 
             ((ISP_RISK+=risk_add))
-            [[ "$risk_level" == "CRITICO" || "$risk_level" == "ALTO" ]] && \
-                isp_add_finding "${risk_level}: Puerto $port abierto — $service"
+            [[ "$risk_level" == "CRITICAL" || "$risk_level" == "HIGH" ]] && \
+                isp_add_finding "${risk_level}: Port $port open — $service"
 
-            # Test de acceso específico por puerto
+            # Port-specific access test
             case $port in
                 23)
-                    _warn "   → Telnet activo: credenciales en texto plano. Probar: telnet $ip 23"
+                    _warn "   → Telnet active: plain-text credentials. Try: telnet $ip 23"
                     ;;
                 7547)
-                    _warn "   → TR-069/CWMP: protocolo de gestión remota CPE. Vectores: CVE-2017-14462"
-                    isp_add_finding "CRITICO: TR-069 expuesto — vector de ataque masivo (CVE-2017-14462)"
+                    _warn "   → TR-069/CWMP: CPE remote management protocol. Vectors: CVE-2017-14462"
+                    isp_add_finding "CRITICAL: TR-069 exposed — mass attack vector (CVE-2017-14462)"
                     ((ISP_RISK+=20))
                     ;;
                 8291)
-                    _warn "   → Winbox accesible: esto no confirma un CVE"
-                    _info "   Auditoría actual de RouterOS: python3 domaininfo.py -m mikrotik $ip"
+                    _warn "   → Winbox reachable: this does not confirm a CVE"
+                    _info "   Current RouterOS audit: python3 domaininfo.py -m mikrotik $ip"
                     ;;
                 161)
-                    _warn "   → SNMP UDP: verificar community strings por defecto"
+                    _warn "   → SNMP UDP: check for default community strings"
                     ;;
                 5900)
-                    _warn "   → VNC: verificar si requiere contraseña"
+                    _warn "   → VNC: check whether it requires a password"
                     ;;
             esac
         else
-            printf "  ${DIM}%-8s %-35s %-12s %s${NC}\n" "$port" "$service" "cerrado" ""
+            printf "  ${DIM}%-8s %-35s %-12s %s${NC}\n" "$port" "$service" "closed" ""
         fi
     done
 
     echo ""
     if [[ ${#open_ports[@]} -gt 0 ]]; then
-        _kvy "Total puertos abiertos" "${#open_ports[@]}: ${open_ports[*]}"
+        _kvy "Total open ports" "${#open_ports[@]}: ${open_ports[*]}"
     else
-        _ok "No se encontraron puertos de administración expuestos"
+        _ok "No exposed administration ports found"
     fi
 
-    # nmap más profundo si disponible
+    # Deeper nmap scan if available
     if command -v nmap &>/dev/null && [[ ${#open_ports[@]} -gt 0 ]]; then
-        _s "Nmap — detección de versión en puertos abiertos"
+        _s "Nmap — version detection on open ports"
         local port_list; port_list=$(IFS=,; echo "${open_ports[*]}")
         nmap -sV --version-intensity 5 -p "$port_list" --open "$ip" 2>/dev/null \
             | grep -E "^[0-9]+|open|VERSION" \
@@ -365,24 +365,24 @@ isp_ports() {
     ISP_OPEN_PORTS="${open_ports[*]}"
 }
 
-# ── 4. Detección de firewall ─────────────────────────────────────
+# ── 4. Firewall detection ────────────────────────────────────────
 isp_firewall() {
     local ip="$1"
-    _h "4 ▸ DETECCIÓN DE FIREWALL"
+    _h "4 ▸ FIREWALL DETECTION"
 
-    _s "Análisis de comportamiento de puertos"
-    local fw_type="Desconocido"
+    _s "Port behavior analysis"
+    local fw_type="Unknown"
     local filtered_count=0 closed_count=0
 
-    # Probar puertos tipicamente filtrados vs cerrados
+    # Probe ports that are typically filtered vs closed
     local test_ports=(135 139 256 666 1025 1026 1900 4444 6667 12345)
     for port in "${test_ports[@]}"; do
         local result
-        # ICMP unreachable = cerrado. Sin respuesta = filtrado (firewall)
+        # ICMP unreachable = closed. No response = filtered (firewall)
         if timeout 1 bash -c "echo >/dev/tcp/$ip/$port" 2>/dev/null; then
-            : # abierto
+            : # open
         else
-            # Intentar detectar RST vs timeout
+            # Try to tell RST apart from a timeout
             local nc_result
             nc_result=$(timeout 1 nc -z -w 1 "$ip" "$port" 2>&1)
             if echo "$nc_result" | grep -qi "refused"; then
@@ -394,24 +394,24 @@ isp_firewall() {
     done
 
     if [[ $filtered_count -gt 5 ]]; then
-        fw_type="Firewall activo (mayoría de puertos filtrados/sin respuesta)"
-        _ok "Firewall detectado — bloqueo de puertos silencioso"
+        fw_type="Active firewall (most ports filtered/no response)"
+        _ok "Firewall detected — silent port blocking"
     elif [[ $closed_count -gt 5 ]]; then
-        fw_type="Sin firewall aparente o con política de RST (puertos cerrados)"
-        _warn "Posible ausencia de firewall — puertos responden con RST"
-        isp_add_finding "MEDIO: Comportamiento sin firewall detectado (RST en puertos)"
+        fw_type="No apparent firewall or an RST policy (closed ports)"
+        _warn "Possibly no firewall — ports answer with RST"
+        isp_add_finding "MEDIUM: No-firewall behavior detected (RST on ports)"
         ((ISP_RISK+=10))
     else
-        fw_type="Mixto — firewall parcial o politicas variadas"
-        _info "Comportamiento mixto — algunos puertos filtrados, otros cerrados"
+        fw_type="Mixed — partial firewall or varied policies"
+        _info "Mixed behavior — some ports filtered, others closed"
     fi
 
-    _kvy "Tipo de firewall inferido" "$fw_type"
+    _kvy "Inferred firewall type" "$fw_type"
 
-    # WAF si tiene web
+    # WAF if it serves web
     if timeout 2 bash -c "echo >/dev/tcp/$ip/80" 2>/dev/null || \
        timeout 2 bash -c "echo >/dev/tcp/$ip/443" 2>/dev/null; then
-        _s "Detección de WAF web"
+        _s "Web WAF detection"
         local waf_headers
         for port in 80 443 8080 8333; do
             local proto="http"; [[ "$port" == "443" ]] && proto="https"
@@ -426,7 +426,7 @@ isp_firewall() {
                 elif echo "$waf_headers" | grep -qi "imperva\|incapsula"; then
                     _kv "WAF" "Imperva/Incapsula"
                 else
-                    _info "WAF web no identificado en puerto $port"
+                    _info "Web WAF not identified on port $port"
                 fi
                 break
             fi
@@ -434,76 +434,76 @@ isp_firewall() {
     fi
 
     # TTL-based OS detection
-    _s "Detección de OS por TTL (ping)"
+    _s "OS detection by TTL (ping)"
     local ttl
     ttl=$(ping -c 1 -W 2 "$ip" 2>/dev/null | grep -oE 'ttl=[0-9]+' | head -1 | cut -d= -f2)
     if [[ -n "$ttl" ]]; then
-        _kv "TTL recibido" "$ttl"
-        if   [[ $ttl -le 64  ]]; then _kv "OS estimado" "Linux / Unix / Android / Networking OS"
-        elif [[ $ttl -le 128 ]]; then _kv "OS estimado" "Windows"
-        elif [[ $ttl -le 255 ]]; then _kv "OS estimado" "Cisco IOS / Solaris / otros"
+        _kv "Received TTL" "$ttl"
+        if   [[ $ttl -le 64  ]]; then _kv "Estimated OS" "Linux / Unix / Android / Networking OS"
+        elif [[ $ttl -le 128 ]]; then _kv "Estimated OS" "Windows"
+        elif [[ $ttl -le 255 ]]; then _kv "Estimated OS" "Cisco IOS / Solaris / others"
         fi
     else
-        _info "ICMP bloqueado — no se puede determinar TTL"
+        _info "ICMP blocked — cannot determine TTL"
     fi
 
     ISP_FIREWALL="$fw_type"
 }
 
-# ── 5. Vulnerabilidades conocidas ────────────────────────────────
+# ── 5. Known vulnerabilities ─────────────────────────────────────
 isp_vulns() {
     local ip="$1"
-    _h "5 ▸ VULNERABILIDADES CONOCIDAS"
+    _h "5 ▸ KNOWN VULNERABILITIES"
 
-    _s "Verificación de vectores comunes"
+    _s "Checking common vectors"
 
-    # TR-069 / CWMP (puerto 7547) — masivo vector de ataque ISP
+    # TR-069 / CWMP (port 7547) — massive ISP attack vector
     if timeout 2 bash -c "echo >/dev/tcp/$ip/7547" 2>/dev/null; then
-        _vuln "TR-069 (CWMP) expuesto en puerto 7547"
-        _vuln "  CVE-2017-14462: Code execution en módems con TR-069"
-        _vuln "  CVE-2016-10372: RCE en dispositivos TalkTalk/Deutsche Telekom"
-        _info "  Millones de routers afectados por Mirai/Hajime via TR-069"
-        isp_add_finding "CRITICO: TR-069 expuesto — vector de botnets (CVE-2017-14462)"
+        _vuln "TR-069 (CWMP) exposed on port 7547"
+        _vuln "  CVE-2017-14462: Code execution on modems with TR-069"
+        _vuln "  CVE-2016-10372: RCE on TalkTalk/Deutsche Telekom devices"
+        _info "  Millions of routers hit by Mirai/Hajime via TR-069"
+        isp_add_finding "CRITICAL: TR-069 exposed — botnet vector (CVE-2017-14462)"
         ((ISP_RISK+=30))
     else
-        _ok "TR-069 (puerto 7547) no accesible desde exterior"
+        _ok "TR-069 (port 7547) not reachable from outside"
     fi
 
-    # Verificar si WebFig/HTTP panel permite acceso sin login
+    # Check whether the WebFig/HTTP panel allows access without login
     for port in 80 8080 8333; do
         if timeout 2 bash -c "echo >/dev/tcp/$ip/$port" 2>/dev/null; then
             local body
             body=$(curl -sk --max-time 5 "http://${ip}:${port}" 2>/dev/null)
             if echo "$body" | grep -qi "mikrotik\|routeros\|webfig"; then
                 if ! echo "$body" | grep -qi "login\|password\|username"; then
-                    _vuln "Panel de administración sin pantalla de login detectado (puerto $port)"
-                    isp_add_finding "CRITICO: Panel admin accesible sin autenticación en puerto $port"
+                    _vuln "Administration panel without a login screen detected (port $port)"
+                    isp_add_finding "CRITICAL: Admin panel reachable without authentication on port $port"
                     ((ISP_RISK+=35))
                 else
-                    _med "Panel de admin con login en puerto $port — verificar credenciales por defecto"
-                    isp_add_finding "MEDIO: Panel admin con login — probar admin/(vacío), admin/admin"
+                    _med "Admin panel with login on port $port — check for default credentials"
+                    isp_add_finding "MEDIUM: Admin panel with login — try admin/(empty), admin/admin"
                     ((ISP_RISK+=10))
                 fi
             fi
         fi
     done
 
-    # DNS recursivo abierto
+    # Open recursive DNS
     if timeout 2 bash -c "echo >/dev/tcp/$ip/53" 2>/dev/null || \
        dig @"$ip" google.com A +time=3 +tries=1 &>/dev/null; then
         local dns_test
         dns_test=$(dig @"$ip" google.com A +short +time=3 +tries=1 2>/dev/null)
         if [[ -n "$dns_test" ]]; then
-            _vuln "DNS Recursivo Abierto — responde a consultas de terceros"
-            _info "  Puede ser usado para ataques DNS Amplification (DDoS)"
-            isp_add_finding "ALTO: DNS recursivo abierto — vector de amplificación DDoS"
+            _vuln "Open recursive DNS — answers third-party queries"
+            _info "  Can be abused for DNS amplification attacks (DDoS)"
+            isp_add_finding "HIGH: Open recursive DNS — DDoS amplification vector"
             ((ISP_RISK+=20))
         else
-            _ok "DNS no recursivo o no responde a consultas externas"
+            _ok "DNS is not recursive or does not answer external queries"
         fi
     fi
 
-    # Proxy abierto
+    # Open proxy
     if timeout 2 bash -c "echo >/dev/tcp/$ip/3128" 2>/dev/null || \
        timeout 2 bash -c "echo >/dev/tcp/$ip/8080" 2>/dev/null; then
         local proxy_test
@@ -511,81 +511,81 @@ isp_vulns() {
             proxy_test=$(curl -sk --max-time 5 --proxy "http://${ip}:${pport}" \
                          "http://httpbin.org/ip" 2>/dev/null | grep -o '"origin":[^"]*"[^"]*"' | head -1)
             if [[ -n "$proxy_test" ]]; then
-                _vuln "Proxy HTTP abierto en puerto $pport — permite anonimizar tráfico"
-                isp_add_finding "ALTO: Proxy abierto en puerto $pport"
+                _vuln "Open HTTP proxy on port $pport — allows anonymizing traffic"
+                isp_add_finding "HIGH: Open proxy on port $pport"
                 ((ISP_RISK+=20))
                 break
             fi
         done
     fi
 
-    # Amplificación NTP
+    # NTP amplification
     if timeout 2 bash -c "echo >/dev/udp/$ip/123" 2>/dev/null; then
-        _warn "Puerto NTP (123/UDP) puede estar activo — verificar amplificación"
-        _info "  Si responde a monlist: vector de DDoS amplificado"
+        _warn "NTP port (123/UDP) may be active — check for amplification"
+        _info "  If it answers monlist: amplified DDoS vector"
     fi
 }
 
-# ── 6. Recomendaciones de mitigación ────────────────────────────
+# ── 6. Mitigation recommendations ───────────────────────────────
 isp_mitigations() {
     local ip="$1"
-    _h "6 ▸ RECOMENDACIONES DE MITIGACIÓN"
+    _h "6 ▸ MITIGATION RECOMMENDATIONS"
     echo ""
 
-    echo -e "  ${W}${BOLD}Para el equipo de red del proveedor:${NC}\n"
+    echo -e "  ${W}${BOLD}For the provider's network team:${NC}\n"
 
     local mitigations=(
-        "Deshabilitar Telnet|/ip service disable telnet (RouterOS)|CRITICO"
-        "Deshabilitar TR-069/CWMP si no se usa activamente|Configurar ACL o deshabilitar en firmware|CRITICO"
-        "Cambiar credenciales por defecto|Contraseña fuerte en todos los servicios admin|CRITICO"
-        "Bloquear WebFig/Winbox desde WAN|Firewall: permitir solo desde IPs admin conocidas|ALTO"
-        "Deshabilitar SNMP community 'public'|Usar SNMPv3 con auth o deshabilitar SNMP|ALTO"
-        "Cerrar DNS recursivo a terceros|Restringir consultas DNS a clientes propios|ALTO"
-        "Deshabilitar FTP si no se usa|/ip service disable ftp (RouterOS)|ALTO"
-        "Actualizar firmware/RouterOS|Mantener siempre la última versión estable|CRITICO"
-        "Implementar fail2ban o brute-force protection|Limitar intentos de login por IP|MEDIO"
-        "Usar VPN para acceso administrativo|No exponer paneles admin a Internet|ALTO"
-        "Segmentar red de gestión|VLAN separada para administración|MEDIO"
-        "Implementar logging centralizado|SIEM o syslog externo para auditoría|MEDIO"
+        "Disable Telnet|/ip service disable telnet (RouterOS)|CRITICAL"
+        "Disable TR-069/CWMP if not actively used|Configure an ACL or disable it in firmware|CRITICAL"
+        "Change default credentials|Strong password on every admin service|CRITICAL"
+        "Block WebFig/Winbox from the WAN|Firewall: allow only known admin IPs|HIGH"
+        "Disable the SNMP community 'public'|Use SNMPv3 with auth or disable SNMP|HIGH"
+        "Close recursive DNS to third parties|Restrict DNS queries to own customers|HIGH"
+        "Disable FTP if not used|/ip service disable ftp (RouterOS)|HIGH"
+        "Update firmware/RouterOS|Always keep the latest stable version|CRITICAL"
+        "Deploy fail2ban or brute-force protection|Limit login attempts per IP|MEDIUM"
+        "Use a VPN for administrative access|Do not expose admin panels to the Internet|HIGH"
+        "Segment the management network|Separate VLAN for administration|MEDIUM"
+        "Deploy centralized logging|SIEM or external syslog for auditing|MEDIUM"
     )
 
-    printf "  ${W}${BOLD}%-50s %-35s %s${NC}\n" "MITIGACIÓN" "CÓMO" "PRIORIDAD"
+    printf "  ${W}${BOLD}%-50s %-35s %s${NC}\n" "MITIGATION" "HOW" "PRIORITY"
     echo -e "  ${DIM}$(printf '─%.0s' {1..95})${NC}"
     for item in "${mitigations[@]}"; do
         IFS='|' read -r action how priority <<< "$item"
         local col="${G}"
-        [[ "$priority" == "CRITICO" ]] && col="${R}"
-        [[ "$priority" == "ALTO"    ]] && col="${Y}"
-        [[ "$priority" == "MEDIO"   ]] && col="${C}"
+        [[ "$priority" == "CRITICAL" ]] && col="${R}"
+        [[ "$priority" == "HIGH"     ]] && col="${Y}"
+        [[ "$priority" == "MEDIUM"   ]] && col="${C}"
         printf "  %-50s %-35s ${col}%s${NC}\n" "$action" "$how" "$priority"
     done
 }
 
-# ── 7. Puntuación y resumen ──────────────────────────────────────
+# ── 7. Score and summary ─────────────────────────────────────────
 isp_summary() {
     local ip="$1"
-    _h "✦  RESUMEN EJECUTIVO — AUDITORÍA ISP"
+    _h "✦  EXECUTIVE SUMMARY — ISP AUDIT"
     echo ""
 
-    _kv "IP auditada"    "$ip"
-    _kv "ISP/Empresa"    "${ISP_ORG:-N/A}"
-    _kv "Ubicación"      "${ISP_CITY:-N/A}, ${ISP_COUNTRY:-N/A}"
-    _kv "Equipo"         "${ISP_DEVICE:-Desconocido}"
-    _kv "Firewall"       "${ISP_FIREWALL:-No determinado}"
-    _kv "Puertos abiertos" "${ISP_OPEN_PORTS:-Ninguno}"
+    _kv "Audited IP"     "$ip"
+    _kv "ISP/Company"    "${ISP_ORG:-N/A}"
+    _kv "Location"       "${ISP_CITY:-N/A}, ${ISP_COUNTRY:-N/A}"
+    _kv "Equipment"      "${ISP_DEVICE:-Unknown}"
+    _kv "Firewall"       "${ISP_FIREWALL:-Not determined}"
+    _kv "Open ports"     "${ISP_OPEN_PORTS:-None}"
     echo ""
 
-    # Ajustar riesgo máximo a 100
+    # Cap the maximum risk at 100
     [[ $ISP_RISK -gt 100 ]] && ISP_RISK=100
     local label color bar_len
-    if   [[ $ISP_RISK -ge 75 ]]; then label="CRÍTICO";  color="${R}"
-    elif [[ $ISP_RISK -ge 50 ]]; then label="ALTO";     color="${Y}"
-    elif [[ $ISP_RISK -ge 25 ]]; then label="MEDIO";    color="${C}"
-    else                              label="BAJO";     color="${G}"
+    if   [[ $ISP_RISK -ge 75 ]]; then label="CRITICAL"; color="${R}"
+    elif [[ $ISP_RISK -ge 50 ]]; then label="HIGH";     color="${Y}"
+    elif [[ $ISP_RISK -ge 25 ]]; then label="MEDIUM";   color="${C}"
+    else                              label="LOW";      color="${G}"
     fi
 
     bar_len=$(( ISP_RISK * 40 / 100 ))
-    echo -e "  ${W}${BOLD}Puntuación de Riesgo:${NC} ${color}${BOLD}${ISP_RISK}/100 — ${label}${NC}"
+    echo -e "  ${W}${BOLD}Risk score:${NC} ${color}${BOLD}${ISP_RISK}/100 — ${label}${NC}"
     echo -ne "  ["
     for ((i=0; i<bar_len; i++)); do echo -ne "${color}█${NC}"; done
     for ((i=bar_len; i<40; i++)); do echo -ne "${DIM}░${NC}"; done
@@ -593,37 +593,37 @@ isp_summary() {
     echo ""
 
     if [[ ${#ISP_FINDINGS[@]} -gt 0 ]]; then
-        _s "Hallazgos identificados (${#ISP_FINDINGS[@]})"
+        _s "Identified findings (${#ISP_FINDINGS[@]})"
         for f in "${ISP_FINDINGS[@]}"; do
             local sev="${f%%:*}" msg="${f#*: }"
             local fc="${G}"
-            [[ "$sev" == "CRITICO" ]] && fc="${R}"
-            [[ "$sev" == "ALTO"    ]] && fc="${Y}"
-            [[ "$sev" == "MEDIO"   ]] && fc="${C}"
+            [[ "$sev" == "CRITICAL" ]] && fc="${R}"
+            [[ "$sev" == "HIGH"     ]] && fc="${Y}"
+            [[ "$sev" == "MEDIUM"   ]] && fc="${C}"
             echo -e "  ${fc}[${sev}]${NC} $msg"
         done
     fi
 
-    # Guardar log
+    # Save log
     local log_dir
     log_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/logs"
     mkdir -p "$log_dir"
     local lf="${log_dir}/isp_audit_${ip//[^0-9]/_}_$(date +%Y%m%d_%H%M%S).txt"
     {
         echo "ISP Audit v3.2.0 — @kevxngg (Kevin)"
-        echo "IP: $ip | ISP: ${ISP_ORG:-N/A} | Equipo: ${ISP_DEVICE:-N/A}"
-        echo "Riesgo: ${ISP_RISK}/100 — $label | Fecha: $(date)"
-        echo ""; echo "HALLAZGOS:"
+        echo "IP: $ip | ISP: ${ISP_ORG:-N/A} | Equipment: ${ISP_DEVICE:-N/A}"
+        echo "Risk: ${ISP_RISK}/100 — $label | Date: $(date)"
+        echo ""; echo "FINDINGS:"
         for f in "${ISP_FINDINGS[@]}"; do echo "  - $f"; done
     } > "$lf"
     echo -e "\n  ${DIM}Log: ${W}${lf}${NC}"
 }
 
-# ── MAIN del módulo ──────────────────────────────────────────────
+# ── Module MAIN ──────────────────────────────────────────────────
 run_isp_audit() {
     local ip="${1:-}"
     if [[ -z "$ip" ]]; then
-        echo -e "${R}Uso: opción ISP desde el menú principal${NC}"
+        echo -e "${R}Usage: ISP option from the main menu${NC}"
         return 1
     fi
 

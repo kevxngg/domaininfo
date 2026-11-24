@@ -1,8 +1,8 @@
-"""Inspección TLS a fondo con ssl de la biblioteca estándar.
+"""In-depth TLS inspection with the standard library's ssl module.
 
-- Certificado verificado o, si falla la verificación, el motivo y los datos del certificado.
-- Versiones de TLS que acepta el servidor (1.0, 1.1, 1.2, 1.3).
-- Nombres del certificado (SAN), emisor, si es autofirmado o comodín.
+- Verified certificate or, when verification fails, the reason and the certificate details.
+- TLS versions the server accepts (1.0, 1.1, 1.2, 1.3).
+- Certificate names (SAN), issuer, and whether it is self-signed or a wildcard.
 """
 
 from datetime import datetime, timezone
@@ -25,7 +25,7 @@ def _flatten(name):
 
 
 def decode_der(der):
-    """Decodifica un certificado DER sin librerías externas (usa el decodificador de CPython)."""
+    """Decode a DER certificate without external libraries (uses CPython's decoder)."""
     decoder = getattr(getattr(ssl, "_ssl", None), "_test_decode_cert", None)
     if decoder is None:
         return {}
@@ -58,7 +58,7 @@ def describe(cert):
 
 
 def inspect(host, port, timeout, server_name=None):
-    """Conexión verificada; si falla la verificación, repite sin verificar para explicar por qué."""
+    """Verified connection; if verification fails, retry without verifying to explain why."""
     sni = server_name or host
     context = ssl.create_default_context()
     try:
@@ -81,7 +81,7 @@ def inspect(host, port, timeout, server_name=None):
 
 
 def versions(host, port, timeout, server_name=None):
-    """True si el servidor acepta esa versión, False si la rechaza, None si este equipo no puede probarla."""
+    """True if the server accepts that version, False if it refuses it, None if this machine cannot test it."""
     result = {}
     for label, attr in VERSIONS:
         version = getattr(ssl.TLSVersion, attr, None)
@@ -93,7 +93,7 @@ def versions(host, port, timeout, server_name=None):
         context.verify_mode = ssl.CERT_NONE
         try:
             with warnings.catch_warnings():
-                # Probar TLS 1.0/1.1 es justo el objetivo: se silencia el aviso de obsolescencia.
+                # Testing TLS 1.0/1.1 is the whole point: silence the deprecation warning.
                 warnings.simplefilter("ignore", DeprecationWarning)
                 context.minimum_version = version
                 context.maximum_version = version
@@ -105,10 +105,10 @@ def versions(host, port, timeout, server_name=None):
         try:
             with socket.create_connection((host, port), timeout=timeout) as raw:
                 with context.wrap_socket(raw, server_hostname=server_name or host) as conn:
-                    # ssl informa "TLSv1" para la 1.0
+                    # ssl reports "TLSv1" for 1.0
                     result[label] = conn.version() in (label, label.replace(".0", ""))
         except ssl.SSLError as exc:
-            # "no protocols available": la OpenSSL local no ofrece esa versión; no se puede concluir.
+            # "no protocols available": the local OpenSSL does not offer that version; no conclusion possible.
             result[label] = None if "no protocols available" in str(exc).lower() else False
         except OSError:
             result[label] = False

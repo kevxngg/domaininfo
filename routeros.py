@@ -9,6 +9,8 @@ import re
 import socket
 from urllib import error, request
 
+from i18n import tr
+
 REVIEWED = "2026-10-26"
 VENDOR = "https://mikrotik.com/supportsec/september-2026-vulnerability/"
 CERT = "https://cert.pl/en/posts/2026/09/mikrotik-routeros-cve/"
@@ -22,19 +24,34 @@ COMMON = (("6.0", "6.49.21"), ("7.0", "7.23.4"), ("7.24", "7.24.2"))
 ADVISORIES = (
     {"id": "CVE-2026-67276", "component": "SSH", "ports": (22,),
      "ranges": (("7.9", "7.23.4"), ("7.24", "7.24.2")),
-     "summary": "Validación de claves RSA en autenticación SSH"},
+     "summary": "RSA key validation in SSH authentication"},
     {"id": "CVE-2026-67277", "component": "bandwidth-test", "ports": (2000,),
-     "ranges": COMMON, "summary": "Control de sesiones del servicio bandwidth-test"},
+     "ranges": COMMON, "summary": "Session control in the bandwidth-test service"},
     {"id": "CVE-2026-67278", "component": "TLS/SSH client", "ports": (),
      "ranges": (("7.0", "7.23.6"), ("7.24", "7.24.3")),
-     "summary": "Verificación de firmas en certificados y claves de host"},
+     "summary": "Signature verification of certificates and host keys"},
     {"id": "CVE-2026-67279", "component": "SSH", "ports": (22,),
-     "ranges": COMMON, "summary": "Control de acceso a canales de comandos SSH"},
+     "ranges": COMMON, "summary": "Access control to SSH command channels"},
     {"id": "CVE-2026-67281", "component": "WebFig", "ports": (80, 443, 8080, 8443),
      "ranges": (("7.20", "7.23.4"), ("7.24", "7.24.2")),
-     "summary": "Acceso a archivos mediante la interfaz web"},
+     "summary": "File access through the web interface"},
     {"id": "CVE-2026-86060", "component": "SSH", "ports": (22,),
-     "ranges": COMMON, "summary": "Tratamiento de nombres de usuario en SSH"},
+     "ranges": COMMON, "summary": "User name handling in SSH"},
+)
+# Summaries are stored in English and translated when the report is built (see assess()).
+SCOPE = "Only the six September 2026 advisories; this is not a security certification"
+LIMITATIONS = (
+    "Declared version or banner not verified against an authenticated inventory",
+    "An open port does not prove a CVE; a closed one does not rule out the advisory",
+    "Custom ports, ACLs and internal configuration need additional review",
+    "Beta/rc builds and branches other than 6/7 need manual review",
+    "Catalog and versions are a dated snapshot, not a real-time lookup",
+)
+RECOMMENDATIONS = (
+    "Review the advisories and upgrade within a branch supported by the device",
+    "Restrict SSH, WebFig, Winbox and API to the management network or a VPN",
+    "Disable Telnet, FTP, API without TLS and bandwidth-test if unused",
+    "Review users, scripts, configuration and Flagged state from an authorized session",
 )
 
 
@@ -58,7 +75,7 @@ def parse_version(value):
         value, re.I,
     )
     if not match:
-        raise ValueError("Versión RouterOS inválida; usa 7.25, 7.23.8 o 7.26beta3")
+        raise ValueError(tr("Invalid RouterOS version; use 7.25, 7.23.8 or 7.26beta3"))
     major, minor, patch = (int(match.group(i) or 0) for i in (1, 2, 3))
     return Version((major, minor, patch), (match.group(4) or "").lower(),
                    int(match.group(5) or 0))
@@ -86,7 +103,7 @@ def assess(version_text=None, open_ports=(), provenance="unknown"):
             status = "potentially_affected" if affected else "not_in_affected_range"
         reachable = sorted(set(open_ports).intersection(entry["ports"]))
         findings.append({
-            "id": entry["id"], "component": entry["component"], "summary": entry["summary"],
+            "id": entry["id"], "component": entry["component"], "summary": tr(entry["summary"]),
             "status": status, "confirmed": False,
             "affected_ranges": [{"introduced": low, "fixed": high}
                                 for low, high in entry["ranges"]],
@@ -109,20 +126,9 @@ def assess(version_text=None, open_ports=(), provenance="unknown"):
         "release_snapshot": {"reviewed": REVIEWED, "versions": RELEASES,
                              "source": RELEASES_URL, "comparison": comparisons},
         "advisories": findings,
-        "scope": "Solo los seis avisos de septiembre de 2026; no es una certificación de seguridad",
-        "limitations": [
-            "Versión declarada o banner no verificado contra un inventario autenticado",
-            "Un puerto abierto no demuestra un CVE; uno cerrado no descarta el aviso",
-            "Puertos personalizados, ACL y configuración interna requieren revisión adicional",
-            "Beta/rc y ramas diferentes de 6/7 requieren revisión manual",
-            "Catálogo y versiones son una instantánea fechada, no una consulta en tiempo real",
-        ],
-        "recommendations": [
-            "Revisar los avisos y actualizar dentro de una rama compatible con el equipo",
-            "Restringir SSH, WebFig, Winbox y API a la red de gestión o una VPN",
-            "Deshabilitar Telnet, FTP, API sin TLS y bandwidth-test si no se utilizan",
-            "Revisar usuarios, scripts, configuración y estado Flagged desde una sesión autorizada",
-        ],
+        "scope": tr(SCOPE),
+        "limitations": [tr(text) for text in LIMITATIONS],
+        "recommendations": [tr(text) for text in RECOMMENDATIONS],
     }
 
 
@@ -199,5 +205,5 @@ def audit(target, args, probe_ports):
     if result["version_conflict"]:
         for entry in result["advisories"]:
             entry["status"] = "manual_review"
-        result["limitations"].append("Versiones contradictorias: validar el inventario antes de concluir")
+        result["limitations"].append(tr("Conflicting versions: validate the inventory before concluding"))
     return result

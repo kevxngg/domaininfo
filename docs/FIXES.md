@@ -1,32 +1,32 @@
-# Correcciones de la versión 4
+# Version 4 fixes
 
-La versión 4.2 añade un menú guiado con navegación de regreso, validación que permite reintentar, progreso por módulo y visor de reportes. La entrada Bash sin argumentos abre este menú; el menú anterior sigue disponible con `--legacy`. Los comandos con objetivo conservan su salida JSON.
+Version 4.2 adds a guided menu with back navigation, validation that lets you retry, per-module progress and a report viewer. The Bash entry point without arguments opens this menu; the previous menu is still available with `--legacy`. Commands with a target keep their JSON output.
 
-La versión 4.1 añade la auditoría portable de RouterOS por versión, con catálogo fechado y evidencias separadas de la aplicabilidad de un CVE. Ver [MIKROTIK.md](MIKROTIK.md).
+Version 4.1 adds the portable, version-based RouterOS audit, with a dated catalog and evidence kept separate from the applicability of a CVE. See [MIKROTIK.md](MIKROTIK.md).
 
-No se encontraron logs de la sesión antigua de Termux. Estas correcciones provienen de la revisión del código y de pruebas reproducibles; no prueban cuál fue el error exacto de aquella sesión.
+No logs from the old Termux session were found. These fixes come from code review and reproducible tests; they do not prove what the exact error in that session was.
 
-| Problema encontrado | Corrección |
+| Problem found | Fix |
 |---|---|
-| El instalador ocultaba stderr y el fallo de paquetes tras pipelines grep/head | Instalación con `set -euo pipefail`, salida visible y fallo inmediato |
-| Un paquete opcional fallido impedía instalar el conjunto base | Python es el único requisito base; herramientas clásicas con `--legacy` |
-| Alias sin comillas alrededor de rutas con espacios, symlink que alteraba SCRIPT_DIR | Launcher que conserva la ruta absoluta con comillas, sin modificar bashrc/zshrc |
-| Uso de Bash asociativo en macOS con Bash 3.2 | Núcleo Python nativo y comprobación de Bash 4+ en la entrada clásica |
-| `timeout` GNU no existe con ese nombre en macOS | Reconocimiento de `gtimeout` en la entrada clásica; Python no lo necesita |
-| `date -Iseconds` y `date -d` no portables | Timestamp con formato explícito y fallback BSD para la fecha del certificado HTTP |
-| Dependencias whois/host obligatorias para cualquier modo | Solo curl/dig comunes; WHOIS se omite con un mensaje si falta; núcleo Python independiente |
-| Permisos RAW para Nmap en Termux | Escaneo clásico TCP con `-sT`; núcleo portable usa conexiones TCP sin root |
-| RETURN traps podían persistir y borrar temporales de otras funciones | Limpieza explícita de temporales y registro para interrupción en la entrada clásica |
-| Concurrencia cero o inválida y modos desconocidos aceptados | Validación de argumentos en ambas entradas |
-| IPv4 con octetos 08/09 disparaba aritmética octal de Bash | Conversión explícita en base diez |
-| Quiet seguía imprimiendo módulos y menú repetía al recibir EOF | Salida de escaneo silenciosa y salida del menú al cerrar stdin |
-| LAN asumía `192.168.1.0/24` cuando no se podía detectar red | No iniciar descubrimiento sobre una red supuesta |
-| Traceroute Python etiquetaba TCP como saltos sin medir TTL | Eliminar ese fallback y declarar la limitación de permisos |
-| OpenSSL podía interpretar `Cipher: 0000` como TLS negociado | Rechazar cifrados NONE/0000, enviar SNI y no confundir un fallo local con protocolo deshabilitado |
-| Reporte llamado completo truncaba el log a 200 líneas | HTML clásico incluye todas las líneas del archivo |
+| The installer hid stderr and package failures behind grep/head pipelines | Installation with `set -euo pipefail`, visible output and immediate failure |
+| One failed optional package blocked installing the base set | Python is the only base requirement; classic tools with `--legacy` |
+| Unquoted alias around paths with spaces, symlink that altered SCRIPT_DIR | Launcher that keeps the quoted absolute path, without modifying bashrc/zshrc |
+| Bash associative arrays used on macOS with Bash 3.2 | Native Python core and a Bash 4+ check in the classic entry point |
+| GNU `timeout` does not exist under that name on macOS | `gtimeout` is recognized in the classic entry point; Python does not need it |
+| `date -Iseconds` and `date -d` are not portable | Timestamp with an explicit format and a BSD fallback for the HTTP certificate date |
+| whois/host dependencies were mandatory for every mode | Only the common curl/dig; WHOIS is skipped with a message if missing; independent Python core |
+| RAW permissions for Nmap on Termux | Classic TCP scan with `-sT`; the portable core uses TCP connections without root |
+| RETURN traps could persist and delete other functions' temporary files | Explicit cleanup of temporary files and registration for interrupts in the classic entry point |
+| Zero or invalid concurrency and unknown modes were accepted | Argument validation in both entry points |
+| IPv4 with 08/09 octets triggered Bash octal arithmetic | Explicit base-ten conversion |
+| Quiet still printed modules and the menu looped on EOF | Silent scan output and menu exit when stdin closes |
+| LAN assumed `192.168.1.0/24` when the network could not be detected | Do not start discovery on a guessed network |
+| Python traceroute labeled TCP as hops without measuring TTL | Remove that fallback and state the permission limitation |
+| OpenSSL could read `Cipher: 0000` as negotiated TLS | Reject NONE/0000 ciphers, send SNI and do not mistake a local failure for a disabled protocol |
+| A report called complete truncated the log to 200 lines | The classic HTML includes every line of the file |
 
-## Validación
+## Validation
 
-La suite portable cubre entrada IPv4/IPv6/IDNA, argumentos inválidos, batch BOM/CRLF, puertos abiertos/cerrados locales, headers HTTP, respuestas HTTP 404, tamaño máximo de respuesta, errores TLS/RDAP, errores de traceroute, escape HTML, nombres únicos, modo quiet y fallo de escritura. TLS y RDAP se prueban con mocks; no son una validación contra todos los proveedores reales.
+The portable suite covers IPv4/IPv6/IDNA input, invalid arguments, BOM/CRLF batch files, local open/closed ports, HTTP headers, HTTP 404 responses, maximum response size, TLS/RDAP errors, traceroute errors, HTML escaping, unique names, quiet mode and write failures. TLS and RDAP are tested with mocks; they are not a validation against every real provider.
 
-La compatibilidad declarada del núcleo corresponde a Python 3.10+ y APIs estándar. Las funciones de red dependen de conectividad y permisos del equipo. La suite de GitHub incluye Windows/Linux/macOS; no simula las restricciones de Android. Los módulos heredados requieren una revisión adicional para confirmar hallazgos y no constituyen un escáner de CVEs verificado.
+The declared compatibility of the core is Python 3.10+ and standard APIs. Network functions depend on the machine's connectivity and permissions. The GitHub suite includes Windows/Linux/macOS; it does not simulate Android restrictions. The legacy modules need an additional review to confirm findings and are not a verified CVE scanner.

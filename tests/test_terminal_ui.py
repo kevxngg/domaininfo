@@ -1,5 +1,4 @@
 import io
-import json
 from pathlib import Path
 import shutil
 import socket
@@ -10,7 +9,12 @@ import unittest
 from unittest.mock import patch
 
 import domaininfo as core
+import i18n
 from terminal_ui import InteractiveApp, Plan, safe_text, logo_lines
+
+
+def setUpModule():
+    i18n.set_language('en')
 
 
 class UITests(unittest.TestCase):
@@ -30,8 +34,8 @@ class UITests(unittest.TestCase):
             text = out.getvalue()
             self.assertIn('CVE-2026-67278', text)
             self.assertIn('7.24.2', text)
-            self.assertIn('Versión RouterOS inválida', text)
-            self.assertNotIn('Hasta luego', text)
+            self.assertIn('Invalid RouterOS version', text)
+            self.assertNotIn('Goodbye', text)
             self.assertNotIn('"modules":', text)
             self.assertNotIn('\x1b', text)
 
@@ -44,7 +48,7 @@ class UITests(unittest.TestCase):
             self.assertEqual(ui.run(), 0)
             data = ui.history[0]['report']['modules']['ports']['data']
             self.assertEqual(data['results'][0]['state'], 'open')
-            self.assertIn('Puertos TCP accesibles: ' + port, out.getvalue())
+            self.assertIn('Reachable TCP ports: ' + port, out.getvalue())
 
     def test_batch_omits_invalid_and_duplicates_and_skips_rdap(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -55,7 +59,7 @@ class UITests(unittest.TestCase):
                 self.assertEqual(ui.run(), 0)
             self.assertEqual(len(ui.history), 2)
             self.assertEqual(len(list(Path(directory).glob('*.json'))), 2)
-            self.assertIn('2 líneas inválidas', out.getvalue())
+            self.assertIn('2 invalid or duplicate lines', out.getvalue())
 
     def test_back_at_target_does_not_start_scan(self):
         ui, _ = self.ui(['2', '0', '0'], Path('logs'))
@@ -65,13 +69,13 @@ class UITests(unittest.TestCase):
     def test_bad_menu_option_retries(self):
         ui, out = self.ui(['garbage', '0'], Path('logs'))
         self.assertEqual(ui.run(), 0)
-        self.assertIn('Opción no válida', out.getvalue())
+        self.assertIn('Invalid option', out.getvalue())
 
     def test_eof_closes_without_traceback(self):
         ui, out = self.ui([], Path('logs'))
         ui.read = lambda: (_ for _ in ()).throw(EOFError())
         self.assertEqual(ui.run(), 0)
-        self.assertIn('Sesión cerrada', out.getvalue())
+        self.assertIn('Session closed', out.getvalue())
 
     def test_ctrl_c_returns_home(self):
         ui, out = self.ui([], Path('logs'))
@@ -84,7 +88,7 @@ class UITests(unittest.TestCase):
             return value
         ui.read = read
         self.assertEqual(ui.run(), 0)
-        self.assertIn('Acción cancelada', out.getvalue())
+        self.assertIn('Action cancelled', out.getvalue())
 
     def test_preferences_validate_and_are_copied_per_scan(self):
         ui, _ = self.ui(['1', 'nan', '2.5', '2', '65', '8', '0'], Path('logs'))
@@ -113,7 +117,7 @@ class UITests(unittest.TestCase):
             good.write_text('localhost\n', encoding='utf-8')
             ui, out = self.ui([str(empty), str(good)], directory)
             self.assertEqual(ui.load_batch()[1], ['localhost'])
-            self.assertIn('no contiene objetivos válidos', out.getvalue())
+            self.assertIn('contains no valid targets', out.getvalue())
 
     def test_report_history_deduplicates_and_ignores_invalid_json(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -159,7 +163,14 @@ class UITests(unittest.TestCase):
         result = subprocess.run([sys.executable, 'domaininfo.py', '--interactive'], input='0\n',
                                 text=True, capture_output=True, encoding='utf-8', timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('MAIN MENU', result.stdout)
+
+    def test_interactive_cli_in_spanish(self):
+        result = subprocess.run([sys.executable, 'domaininfo.py', '--lang', 'es', '--interactive'],
+                                input='0\n', text=True, capture_output=True, encoding='utf-8', timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('MENÚ PRINCIPAL', result.stdout)
+        self.assertIn('Varios objetivos', result.stdout)
 
     def test_main_automatic_tty_entry(self):
         with patch.object(core.sys.stdin, 'isatty', return_value=True), \
@@ -194,7 +205,7 @@ class UITests(unittest.TestCase):
                 ui.execute(Plan(args, ['routeros-offline']))
             self.assertEqual(len(ui.history), 1)
             self.assertEqual(ui.history[0]['paths'], [])
-            self.assertIn('No se pudieron guardar', output.getvalue())
+            self.assertIn('Could not save the reports', output.getvalue())
 
     def test_ascii_logo_fits_desktop_and_mobile(self):
         for available in (28, 34, 36, 60, 76, 86):
@@ -216,18 +227,18 @@ class UITests(unittest.TestCase):
         ui, output = self.ui(['1', '2.5', 'r'], Path('logs'))
         ui.preferences(ui.defaults)
         self.assertEqual(ui.defaults.timeout, 2.5)
-        self.assertIn('[0 / r] Regresar', output.getvalue())
+        self.assertIn('[0 / r] Back', output.getvalue())
 
     def test_mikrotik_return_goes_to_its_submenu(self):
         ui, output = self.ui(['5', '2', 'r', '0', '0'], Path('logs'))
         with patch.object(core, 'scan', side_effect=AssertionError('scan')):
             self.assertEqual(ui.run(), 0)
-        self.assertEqual(output.getvalue().count('[2]  Revisar solo una versión'), 2)
+        self.assertEqual(output.getvalue().count('[2]  Check a version only'), 2)
 
     def test_return_at_home_does_not_exit(self):
         ui, output = self.ui(['r', '0'], Path('logs'))
         self.assertEqual(ui.run(), 0)
-        self.assertIn('Ya estás en el menú principal', output.getvalue())
+        self.assertIn('You are already at the main menu', output.getvalue())
 
     def test_explained_routeros_results_include_matching_branch_fix(self):
         import routeros
@@ -236,13 +247,13 @@ class UITests(unittest.TestCase):
             'mikrotik': {'status': 'ok', 'data': routeros.assess('7.24.2')}}})
         text = output.getvalue()
         self.assertIn('CVE-2026-67278', text)
-        self.assertIn('Versión que corrige este aviso en esa rama: 7.24.3', text)
+        self.assertIn('Version that fixes this advisory in that branch: 7.24.3', text)
         self.assertNotIn('"affected_ranges"', text)
 
     def test_summary_explains_certificate_error(self):
         ui, output = self.ui([], Path('logs'))
         ui.summary({'modules': {'tls': {'status': 'error', 'error': 'CERTIFICATE_VERIFY_FAILED'}}})
-        self.assertIn('No se pudo validar el certificado', output.getvalue())
+        self.assertIn('The certificate could not be validated', output.getvalue())
         self.assertNotIn('CERTIFICATE_VERIFY_FAILED', output.getvalue())
 
     def test_viewer_details_are_readable_and_json_is_separate(self):
@@ -250,7 +261,7 @@ class UITests(unittest.TestCase):
         entry = {'report': {'meta': {'target': 'localhost'}, 'modules': {
             'ports': {'status': 'ok', 'data': {'results': [{'port': 22, 'state': 'open'}]}}}}, 'paths': []}
         ui.viewer(entry)
-        self.assertIn('[RESPONDE] 22/TCP', output.getvalue())
+        self.assertIn('[ANSWERS] 22/TCP', output.getvalue())
         self.assertNotIn('"modules":', output.getvalue())
 
 

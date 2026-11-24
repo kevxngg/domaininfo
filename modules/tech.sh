@@ -21,7 +21,7 @@ info()    { echo -e "  ${DIM}ℹ  $1${NC}"; }
 
 module_tech() {
     is_ip "$TARGET" && return
-    header "12 ▸ TECNOLOGÍAS DETECTADAS"
+    header "12 ▸ DETECTED TECHNOLOGIES"
 
     local base_url="https://${DOMAIN}"
     curl -s --max-time 5 "$base_url" &>/dev/null || base_url="http://${DOMAIN}"
@@ -30,7 +30,7 @@ module_tech() {
     body=$(curl -skL --max-time 10 "$base_url" 2>/dev/null | head -200)
     headers=$(curl -sIL --max-time 8 "$base_url" 2>/dev/null)
 
-    section "Stack tecnológico"
+    section "Technology stack"
 
     # CMS detection
     local cms=""
@@ -40,10 +40,10 @@ module_tech() {
         # WordPress specific checks
         local wp_ver
         wp_ver=$(curl -sk --max-time 5 "${base_url}/readme.html" 2>/dev/null | grep -oE 'Version [0-9.]+' | head -1)
-        [[ -n "$wp_ver" ]] && kv_r "WordPress readme expuesto" "$wp_ver (ocultar /readme.html)"
+        [[ -n "$wp_ver" ]] && kv_r "WordPress readme exposed" "$wp_ver (hide /readme.html)"
         local wp_json
         wp_json=$(curl -sk --max-time 5 "${base_url}/wp-json/wp/v2/users" 2>/dev/null | grep -o '"name":"[^"]*"' | head -3)
-        [[ -n "$wp_json" ]] && kv_r "WP REST API usuarios" "Exposición de usuarios activa"
+        [[ -n "$wp_json" ]] && kv_r "WP REST API users" "User enumeration is exposed"
     elif echo "$body" | grep -qi "joomla"; then
         cms="Joomla"; kv_y "CMS" "$cms"
     elif echo "$body" | grep -qi "drupal"; then
@@ -53,19 +53,19 @@ module_tech() {
     elif echo "$body" | grep -qi "django"; then
         cms="Django"; kv "Framework" "$cms"
     fi
-    [[ -z "$cms" ]] && info "CMS/Framework no identificado"
+    [[ -z "$cms" ]] && info "CMS/Framework not identified"
 
     # Server
     local server
     server=$(echo "$headers" | grep -i "^server:" | cut -d: -f2- | xargs)
-    [[ -n "$server" ]] && kv "Servidor web" "$server"
+    [[ -n "$server" ]] && kv "Web server" "$server"
 
     # PHP
     local php_ver
     php_ver=$(echo "$headers" | grep -i "x-powered-by" | cut -d: -f2- | xargs)
     if [[ -n "$php_ver" ]]; then
-        kv_y "X-Powered-By (expuesto)" "$php_ver"
-        info "Ocultar X-Powered-By: header('X-Powered-By: ')  o  php_flag expose_php Off"
+        kv_y "X-Powered-By (exposed)" "$php_ver"
+        info "Hide X-Powered-By: header('X-Powered-By: ')  or  php_flag expose_php Off"
     fi
 
     # JS frameworks
@@ -84,5 +84,5 @@ module_tech() {
 }
 
 # ════════════════════════════════════════════════════════════════════
-# GUARDAR LOG
+# SAVE LOG
 # ════════════════════════════════════════════════════════════════════

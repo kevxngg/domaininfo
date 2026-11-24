@@ -23,11 +23,17 @@ import time
 from urllib import error, parse, request
 import uuid
 
-VERSION = "5.0.0"
+import i18n
+from i18n import tr
+
+VERSION = "6.0.0"
 REPO = "kevxngg/domaininfo"
 CERT_WARN_DAYS = 30
 MODULES = ("dns", "rdap", "asn", "http", "tls", "tech", "mail", "subdomains", "history",
-           "ports", "traceroute", "lookalike", "mikrotik")
+           "ports", "traceroute", "lookalike", "mikrotik", "webapp", "session", "apispec", "zap", "browser",
+           "tools", "intel")
+# Static analysis tools used by the "code" mode on a local project folder
+CODE_TOOLS = ("semgrep", "bandit", "pip-audit", "trivy", "gitleaks")
 MODES = {
     "quick": ("dns", "rdap"),
     "web": ("dns", "http", "tls", "tech"),
@@ -37,13 +43,23 @@ MODES = {
     "mail": ("dns", "mail"),
     "recon": ("dns", "rdap", "asn", "tech", "subdomains", "history"),
     "brand": ("dns", "lookalike"),
+    "webapp": ("webapp",),
+    "session": ("session",),
+    "apispec": ("apispec",),
+    "zap": ("zap",),
+    "browser": ("browser",),
+    "code": ("tools",),
 }
-# Modos y módulos que solo tienen sentido con un dominio (no con una IP)
+# Modes and modules that only make sense for a domain (not for an IP address)
 DOMAIN_ONLY = {"mail", "subdomains", "history", "lookalike"}
+# Modes whose target is a full URL (scheme, host, port, path and query)
+URL_MODES = {"webapp", "session", "apispec", "zap", "browser"}
+# Mode whose target is a local project folder
+PATH_MODES = {"code"}
 
 
 class NotApplicable(Exception):
-    """El módulo no aplica a este objetivo (por ejemplo, correo de una dirección IP)."""
+    """The module does not apply to this target (for example, mail checks for an IP address)."""
 DEFAULT_PORTS = (21, 22, 25, 53, 80, 110, 143, 443, 445, 587, 993, 995,
                  3306, 3389, 5432, 6379, 8080, 8443)
 
@@ -52,22 +68,22 @@ def normalize_target(value):
     """Accept a hostname, IP or HTTP URL without shell interpolation."""
     value = value.strip()
     if not value or any(ord(c) < 33 or ord(c) == 127 for c in value):
-        raise ValueError("Objetivo vacío o con espacios/caracteres de control")
+        raise ValueError(tr("Empty target or target with spaces/control characters"))
     try:
         return str(ipaddress.ip_address(value.strip("[]")))
     except ValueError:
         pass
     url = parse.urlsplit(value if "://" in value else "//" + value)
     if url.scheme and url.scheme.lower() not in ("http", "https"):
-        raise ValueError("Solo se aceptan URLs HTTP/HTTPS")
+        raise ValueError(tr("Only HTTP/HTTPS URLs are accepted"))
     if url.username is not None or url.password is not None:
-        raise ValueError("No se aceptan credenciales en el objetivo")
+        raise ValueError(tr("Credentials are not accepted in the target"))
     host = url.hostname
     # Access port to reject malformed port numbers even though scans use --web-port.
     if url.port is not None and not 1 <= url.port <= 65535:
-        raise ValueError("Puerto fuera de rango")
+        raise ValueError(tr("Port out of range"))
     if not host:
-        raise ValueError("Falta el nombre del objetivo")
+        raise ValueError(tr("The target name is missing"))
     try:
         return str(ipaddress.ip_address(host))
     except ValueError:
@@ -77,10 +93,28 @@ def normalize_target(value):
         re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
         for label in host.split(".")
     ):
-        raise ValueError("Dominio inválido")
+        raise ValueError(tr("Invalid domain"))
     if re.fullmatch(r"[0-9.]+", host):
-        raise ValueError("Dirección IPv4 inválida")
+        raise ValueError(tr("Invalid IPv4 address"))
     return host
+
+
+def normalize_path_target(value):
+    """Existing local folder for the code mode, as an absolute path."""
+    path = Path(value.strip().strip('"')).expanduser()
+    if not path.is_dir():
+        raise ValueError(tr("Not an existing folder: {path}", path=value.strip()))
+    return str(path.resolve())
+
+
+def normalize_for_mode(value, mode):
+    """URL modes keep the full URL, the code mode a local folder; every other mode keeps only the host."""
+    if mode in PATH_MODES:
+        return normalize_path_target(value)
+    if mode in URL_MODES:
+        import safety
+        return safety.normalize_url(value)
+    return normalize_target(value)
 
 
 def resolve(target):
@@ -112,11 +146,11 @@ def is_ip(target):
 
 def require_domain(target):
     if is_ip(target) or "." not in target:
-        raise NotApplicable("solo para dominios")
+        raise NotApplicable(tr("domains only"))
 
 
 def dns_info(target, args):
-    """A/AAAA del sistema y, para dominios, MX, NS, TXT, SOA, CAA, CNAME y DNSSEC con el cliente propio."""
+    """System A/AAAA and, for domains, MX, NS, TXT, SOA, CAA, CNAME and DNSSEC with the built-in client."""
     import dnsclient
     result = {"addresses": resolve(target), "resolver": "system"}
     timeout = min(args.timeout, 5)
@@ -127,7 +161,7 @@ def dns_info(target, args):
             result["ptr"] = []
         return result
     if dnsclient.is_single_label(target):
-        result["note"] = "Nombre local: solo direcciones del sistema"
+        result["note"] = tr("Local name: system addresses only")
         return result
     records, errors = {}, []
 
@@ -153,9 +187,9 @@ def _rdap(target, timeout):
     kind = "ip" if is_ip(target) else "domain"
     meta, body = fetch("https://rdap.org/" + kind + "/" + parse.quote(target, safe=""), timeout)
     if meta["status"] != 200:
-        raise ValueError("RDAP respondió HTTP " + str(meta["status"]))
+        raise ValueError(tr("RDAP answered HTTP {status}", status=meta["status"]))
     if meta["truncated"]:
-        raise ValueError("Respuesta RDAP demasiado grande")
+        raise ValueError(tr("RDAP response too large"))
     return body
 
 
@@ -207,7 +241,7 @@ def history_info(target, args):
     except (OSError, ValueError) as exc:
         result["wayback"] = {"error": str(exc)}
     if "rdap_error" in result and "error" in result["wayback"]:
-        raise ValueError("Sin datos de registro ni de Wayback Machine")
+        raise ValueError(tr("No registration data and no Wayback Machine data"))
     return result
 
 
@@ -233,12 +267,12 @@ def http_info(target, args):
     title = re.search(r"<title[^>]*>(.*?)</title>", body.decode("utf-8", "replace"),
                       re.I | re.S)
     meta["title"] = html.unescape(title.group(1).strip()) if title else None
-    meta["note"] = "Headers ausentes son observaciones; no prueban una vulnerabilidad"
+    meta["note"] = tr("Missing headers are observations; they do not prove a vulnerability")
     return meta
 
 
 def tls_info(target, args):
-    """Certificado (verificado o, si no lo es, el motivo) y versiones TLS aceptadas."""
+    """Certificate (verified or, if not, the reason) and accepted TLS versions."""
     import tlsdeep
     port = args.web_port or 443
     result = tlsdeep.inspect(target, port, args.timeout)
@@ -286,11 +320,12 @@ def trace_info(target, args):
             executable = shutil.which("tracepath")
             command = [executable, "-n", "-m", "15", target]
     if not executable:
-        return {"status": "unavailable", "reason": "Instala traceroute/tracepath; no se simulan saltos TCP"}
+        return {"status": "unavailable",
+                "reason": tr("Install traceroute/tracepath; TCP hops are not simulated")}
     result = subprocess.run(command, capture_output=True, text=True, errors="replace",
                             timeout=50, check=False)
     if result.returncode:
-        raise RuntimeError(result.stderr.strip() or "Traceroute terminó con error")
+        raise RuntimeError(result.stderr.strip() or tr("Traceroute finished with an error"))
     return {"output": result.stdout, "returncode": result.returncode}
 
 
@@ -299,33 +334,163 @@ def mikrotik_info(target, args):
     return routeros.audit(target, args, ports_info)
 
 
+def webapp_info(target, args):
+    """Passive web security review of a full URL (no forms or credentials are ever submitted)."""
+    import webapp
+    return webapp.audit(target if "://" in target else web_url(target, args), args)
+
+
+def session_info(target, args):
+    """Authenticated session audit; requires an authorization file (--auth-file)."""
+    import session_audit
+    if not getattr(args, "auth_file", None):
+        raise NotApplicable(tr("needs an authorization file (--auth-file)"))
+    return session_audit.audit(str(args.auth_file), args)
+
+
+def apispec_info(target, args):
+    """Passive analysis of a documented OpenAPI/Swagger API."""
+    import apispec
+    return apispec.audit(target, args)
+
+
+def zap_info(target, args):
+    """Passive alerts from an OWASP ZAP daemon the user runs on this computer."""
+    import zapclient
+    return zapclient.audit(target, args)
+
+
+def browser_info(target, args):
+    """Page rendered with JavaScript in headless Chromium (optional Playwright)."""
+    import browser
+    return browser.audit(target, args)
+
+
+def tools_info(target, args):
+    """Optional external tools (--tool, or every code analyzer in the code mode)."""
+    import runners
+    names = list(getattr(args, "tool", None) or [])
+    if not names and args.mode in PATH_MODES:
+        names = list(CODE_TOOLS)
+    if not names:
+        raise NotApplicable(tr("no external tool selected (use --tool)"))
+    result = {"results": [], "findings": [], "components": [], "assets": [], "errors": [], "checks": []}
+    for name in dict.fromkeys(names):
+        tool_target = target
+        if name == "pip-audit" and args.mode in PATH_MODES:
+            requirements = Path(target) / "requirements.txt"
+            if not requirements.is_file():
+                result["results"].append({"tool": name, "status": "skipped", "reason": "not_applicable"})
+                result["checks"].append({"id": name, "state": "not_applicable", "evidence": "direct"})
+                continue
+            tool_target = str(requirements)
+        run = runners.run(name, tool_target, options={"ports": ",".join(map(str, args.ports))} if args.ports else None,
+                          allow_active=bool(getattr(args, "active", False)), scope=list(args.scope or []),
+                          timeout=getattr(args, "tool_timeout", None),
+                          allow_private=bool(getattr(args, "allow_private", False)))
+        for key in ("findings", "components", "assets", "errors"):
+            result[key] += run.get(key) or []
+        result["results"].append({k: run.get(k) for k in ("tool", "status", "reason", "active", "available",
+                                                          "version", "install", "duration", "coverage")})
+        # Coverage counts what really ran: a missing or refused tool is "not evaluated", never "ok".
+        state = {"ok": "ok", "error": "error"}.get(run.get("status"), "not_evaluated")
+        if state == "ok" and run.get("findings"):
+            state = "finding"
+        result["checks"].append({"id": name, "state": state, "evidence": "direct"})
+    if not any(row["status"] == "ok" for row in result["results"]):
+        result["note"] = tr("No external tool ran; see each result for the reason and how to install it")
+    return result
+
+
+_BANNER = re.compile(r"\b([A-Za-z][\w.+-]{1,40})/(\d+(?:\.\d+){1,3})\b")
+
+
+def report_components(report):
+    """Software and versions seen in a report, with how strong the evidence is."""
+    found = []
+    modules = report.get("modules", {})
+    data = (modules.get("tools") or {}).get("data") or {}
+    found += [c for c in data.get("components", []) if isinstance(c, dict)]
+    banners = []
+    tech = (modules.get("tech") or {}).get("data") or {}
+    banners += (tech.get("headers_grade") or {}).get("version_leaks") or []
+    if tech.get("generator"):
+        banners.append(tech["generator"].replace(" ", "/", 1))
+    web = (modules.get("webapp") or {}).get("data") or {}
+    banners += (web.get("headers") or {}).get("version_leaks") or []
+    for text in banners:
+        for name, version in _BANNER.findall(str(text)):
+            # A banner is what the server says about itself: distributions backport fixes without changing
+            # the version, so it never supports more than a 'likely' match.
+            found.append({"name": name.lower(), "version": version, "evidence": "heuristic",
+                          "source": "banner", "location": str(text)[:120]})
+    unique = {}
+    for item in found:
+        unique.setdefault((str(item.get("name")).lower(), str(item.get("version"))), item)
+    return list(unique.values())
+
+
+def intel_info(target, args, report):
+    """Known vulnerabilities (OSV, NVD, CISA KEV) for the software versions found so far."""
+    import vulnintel
+    components = report_components(report)
+    if not components:
+        return {"components": [], "findings": [], "matches": [],
+                "checks": [{"id": "correlation", "state": "not_applicable", "evidence": "direct"}],
+                "note": tr("No software versions were identified, so there is nothing to correlate")}
+    result = vulnintel.correlate(components, target=target)
+    result["components"] = components
+    state = "error" if result.get("errors") and not result.get("sources") else (
+        "finding" if result.get("findings") else "ok")
+    # Version evidence from banners is heuristic, so the correlation is too
+    direct = all(c.get("evidence") == "direct" for c in components)
+    result["checks"] = [{"id": "correlation", "state": state, "evidence": "direct" if direct else "heuristic"}]
+    return result
+
+
 RUNNERS = {"dns": dns_info, "rdap": rdap_info, "asn": asn_info, "http": http_info,
            "tls": tls_info, "tech": tech_info, "mail": mail_info, "subdomains": subdomains_info,
            "history": history_info, "ports": ports_info, "traceroute": trace_info,
-           "lookalike": lookalike_info, "mikrotik": mikrotik_info}
+           "lookalike": lookalike_info, "mikrotik": mikrotik_info, "webapp": webapp_info,
+           "session": session_info, "apispec": apispec_info, "zap": zap_info, "browser": browser_info,
+           "tools": tools_info, "intel": intel_info}
+
+
+def active_modules(args):
+    """Modules of the mode plus the optional ones requested with --tool and --intel."""
+    names = list(MODES[args.mode])
+    if getattr(args, "tool", None) and "tools" not in names:
+        names.append("tools")
+    if getattr(args, "intel", False):
+        names.append("intel")
+    return names
 
 
 def scan(target, args, on_progress=None):
     report = {"meta": {"tool": "DomainInfo", "version": VERSION, "target": target,
                        "date": datetime.now(timezone.utc).isoformat(), "mode": args.mode,
-                       "platform": platform.system()}, "modules": {}}
-    for index, name in enumerate(MODES[args.mode], 1):
+                       "platform": platform.system(), "language": i18n.language()}, "modules": {}}
+    names = active_modules(args)
+    for index, name in enumerate(names, 1):
         if name in args.skip:
             report["modules"][name] = {"status": "skipped"}
             if on_progress:
-                on_progress(name, "skipped", index, len(MODES[args.mode]))
+                on_progress(name, "skipped", index, len(names))
             continue
         if on_progress:
-            on_progress(name, "running", index, len(MODES[args.mode]))
+            on_progress(name, "running", index, len(names))
         try:
-            data = RUNNERS[name](target, args)
+            data = intel_info(target, args, report) if name == "intel" else RUNNERS[name](target, args)
             report["modules"][name] = {"status": "ok", "data": data}
         except NotApplicable as exc:
             report["modules"][name] = {"status": "skipped", "reason": str(exc)}
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
             report["modules"][name] = {"status": "error", "error": str(exc)}
+        except Exception as exc:  # noqa: BLE001 - hostile data must never cost the other modules' results
+            report["modules"][name] = {"status": "error", "error": tr(
+                "Unexpected error in the module ({kind}): {error}", kind=type(exc).__name__, error=str(exc)[:300])}
         if on_progress:
-            on_progress(name, report["modules"][name]["status"], index, len(MODES[args.mode]))
+            on_progress(name, report["modules"][name]["status"], index, len(names))
         # The readable output draws its own progress; JSON mode keeps the classic stderr lines.
         if not args.quiet and not getattr(args, "human", False):
             print(f"[{name}] {report['modules'][name]['status']}", file=sys.stderr)
@@ -333,6 +498,10 @@ def scan(target, args, on_progress=None):
     assessment = score.assess(report)
     if assessment:
         report["score"] = assessment
+    import evidence
+    detail = evidence.assess(report)
+    if detail:
+        report["assessment"] = detail
     return report
 
 
@@ -369,14 +538,18 @@ def save_report(report, directory, formats):
 
 
 def save_batch(reports, directory):
-    """Mapa de infraestructura (JSON/MD) y resumen CSV de varios objetivos."""
+    """Infrastructure map (JSON/MD), attack-surface inventory (JSON) and CSV summary of several targets."""
     import infra
+    import inventory
     directory.mkdir(parents=True, exist_ok=True)
-    stem = f"domaininfo_lote_{datetime.now(timezone.utc):%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:6]}"
+    # File names stay the same in every language so scripts can find them.
+    stem = f"domaininfo_batch_{datetime.now(timezone.utc):%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:6]}"
     result = infra.correlate(reports)
     paths = []
-    for suffix, content in ((".csv", infra.to_csv(reports)), ("_mapa.md", infra.map_markdown(result)),
-                            ("_mapa.json", json.dumps(result, ensure_ascii=False, indent=2) + "\n")):
+    for suffix, content in ((".csv", infra.to_csv(reports)), ("_map.md", infra.map_markdown(result)),
+                            ("_map.json", json.dumps(result, ensure_ascii=False, indent=2) + "\n"),
+                            ("_inventory.json", json.dumps(inventory.build(reports), ensure_ascii=False,
+                                                           indent=2, default=str) + "\n")):
         path = directory / (stem + suffix)
         atomic_write(path, content)
         paths.append(str(path))
@@ -388,9 +561,9 @@ def bounded_int(low, high):
         try:
             number = int(value)
         except ValueError as exc:
-            raise argparse.ArgumentTypeError("Debe ser un entero") from exc
+            raise argparse.ArgumentTypeError(tr("Must be an integer")) from exc
         if not low <= number <= high:
-            raise argparse.ArgumentTypeError(f"Debe estar entre {low} y {high}")
+            raise argparse.ArgumentTypeError(tr("Must be between {low} and {high}", low=low, high=high))
         return number
     return convert
 
@@ -399,9 +572,9 @@ def timeout_value(value):
     try:
         number = float(value)
     except ValueError as exc:
-        raise argparse.ArgumentTypeError("Timeout inválido") from exc
+        raise argparse.ArgumentTypeError(tr("Invalid timeout")) from exc
     if not math.isfinite(number) or not 0.1 <= number <= 60:
-        raise argparse.ArgumentTypeError("Timeout debe estar entre 0.1 y 60 segundos")
+        raise argparse.ArgumentTypeError(tr("Timeout must be between 0.1 and 60 seconds"))
     return number
 
 
@@ -409,109 +582,210 @@ def port_list(value):
     try:
         return sorted({bounded_int(1, 65535)(item.strip()) for item in value.split(",")})
     except argparse.ArgumentTypeError as exc:
-        raise argparse.ArgumentTypeError("Puertos inválidos: usa 22,80,443 (1-65535)") from exc
+        raise argparse.ArgumentTypeError(tr("Invalid ports: use 22,80,443 (1-65535)")) from exc
 
 
 def doctor():
+    import tools
     return {"python": platform.python_version(), "platform": platform.platform(),
-            "openssl": ssl.OPENSSL_VERSION, "core": "stdlib; sin root ni pip",
+            "openssl": ssl.OPENSSL_VERSION, "core": tr("stdlib; no root or pip needed"),
             "optional": {name: shutil.which(name) for name in
-                         ("traceroute", "tracepath", "tracert", "bash", "nmap", "dig", "whois")}}
+                         ("traceroute", "tracepath", "tracert", "bash", "nmap", "dig", "whois")},
+            "integrations": tools.detect_all()}
+
+
+def tool_list(value):
+    """--tool: comma-separated names from the optional tools catalog."""
+    import tools
+    names = [item.strip().lower() for item in value.split(",") if item.strip()]
+    unknown = [name for name in names if name not in tools.CATALOG]
+    if unknown or not names:
+        raise argparse.ArgumentTypeError(tr("Unknown tool: {names}. Available: {available}",
+                                            names=", ".join(unknown) or value, available=", ".join(tools.CATALOG)))
+    return names
+
+
+def host_list(value):
+    """--scope: comma-separated hosts; accepts *.domain."""
+    import safety
+    hosts = []
+    for item in value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            wildcard = item.startswith("*.")
+            hosts.append(("*." if wildcard else "") + safety.normalize_host(item[2:] if wildcard else item))
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(tr("Invalid host in --scope: {host}", host=item)) from exc
+    return hosts
 
 
 EXAMPLES = """\
-ejemplos:
-  domaininfo                                    menú guiado
-  domaininfo example.com                        análisis rápido (DNS + registro)
-  domaininfo -m web example.com                 web, cabeceras y certificado TLS
+examples:
+  domaininfo                                    guided menu
+  domaininfo example.com                        quick analysis (DNS + registration)
+  domaininfo -m web example.com                 website, headers and TLS certificate
   domaininfo -m ports --ports 22,80,443 10.0.0.5
-  domaininfo -m full -s traceroute example.com  todo menos la ruta de red
-  domaininfo -f objetivos.txt -m web --format html
+  domaininfo -m full -s traceroute example.com  everything except the network route
+  domaininfo -f targets.txt -m web --format html
   domaininfo -m mikrotik 192.168.88.1
   domaininfo -m mikrotik --offline --routeros-version 7.24.2
-  domaininfo -m web --watch 300 example.com     vigilar y avisar de cambios
-  domaininfo example.com --json --pretty        JSON con sangría
-  domaininfo example.com | jq .                 en una tubería sale JSON automáticamente
+  domaininfo -m web --watch 300 example.com     watch and report changes
+  domaininfo -m webapp --url https://example.com/login
+                                                passive web security review of one URL
+  domaininfo -m webapp --url https://app.example.com/ --scope auth.example.com
+                                                allows following redirects to another authorized host
+  domaininfo example.com --json --pretty        indented JSON
+  domaininfo example.com | jq .                 in a pipe the output is JSON automatically
+  domaininfo --lang es example.com              output in Spanish (or set DOMAININFO_LANG=es)
 
-salida:
-  En una terminal se muestra un resumen legible con colores. Si la salida va a otro
-  programa o archivo, o usas --json/-q, se imprime el JSON de siempre (uno por objetivo).
-  NO_COLOR desactiva los colores. Códigos de salida: 0 correcto, 1 errores en módulos u
-  objetivos, 2 argumentos inválidos, 130 interrumpido.
+output:
+  At a terminal you get a readable, colored summary. If the output goes to another
+  program or a file, or you use --json/-q, the usual JSON is printed (one per target).
+  NO_COLOR disables colors. Exit codes: 0 success, 1 errors in modules or
+  targets, 2 invalid arguments, 130 interrupted.
 
-Usa los modos de red solo sobre sistemas que tengas autorización para revisar."""
+Use the network modes only on systems you are authorized to review."""
 
 
-class SpanishHelp(argparse.RawDescriptionHelpFormatter):
+class LocalizedHelp(argparse.RawDescriptionHelpFormatter):
     def add_usage(self, usage, actions, groups, prefix=None):
-        return super().add_usage(usage, actions, groups, "uso: " if prefix is None else prefix)
+        return super().add_usage(usage, actions, groups, tr("usage: ") if prefix is None else prefix)
+
+
+def default_language():
+    """Language from DOMAININFO_LANG, else English (``--lang`` overrides it)."""
+    value = (os.environ.get("DOMAININFO_LANG") or "").strip().lower()[:2]
+    return value if value in i18n.SUPPORTED else "en"
 
 
 def parser():
-    cli = argparse.ArgumentParser(prog="domaininfo", add_help=False, formatter_class=SpanishHelp,
-                                  description="DomainInfo: diagnóstico portable de dominios e IPs",
-                                  epilog=EXAMPLES)
-    cli._positionals.title = "argumentos"
-    cli._optionals.title = "general"
-    cli.add_argument("target", nargs="?", help="dominio, IPv4, IPv6 o URL HTTP/HTTPS")
-    cli.add_argument("-h", "--help", action="help", help="muestra esta ayuda y sale")
-    cli.add_argument("--version", action="version", version=VERSION, help="muestra la versión y sale")
-    cli.add_argument("--interactive", action="store_true", help="abre el menú guiado")
-    cli.add_argument("--doctor", action="store_true", help="diagnóstico local del equipo, sin escaneos")
-    cli.add_argument("--update", action="store_true", help="actualiza DomainInfo a la última versión")
+    cli = argparse.ArgumentParser(prog="domaininfo", add_help=False, formatter_class=LocalizedHelp,
+                                  description=tr("DomainInfo: portable diagnostics for domains and IPs"),
+                                  epilog=tr(EXAMPLES))
+    cli._positionals.title = tr("arguments")
+    cli._optionals.title = tr("general")
+    cli.add_argument("target", nargs="?", help=tr("domain, IPv4, IPv6 or HTTP/HTTPS URL"))
+    cli.add_argument("-h", "--help", action="help", help=tr("show this help and exit"))
+    cli.add_argument("--version", action="version", version=VERSION, help=tr("show the version and exit"))
+    cli.add_argument("--interactive", action="store_true", help=tr("open the guided menu"))
+    cli.add_argument("--doctor", action="store_true", help=tr("local diagnostics of this computer, no scans"))
+    cli.add_argument("--update", action="store_true", help=tr("update DomainInfo to the latest version"))
     cli.add_argument("--completion", choices=("bash", "zsh", "powershell"),
-                     help="imprime el script de autocompletado para tu shell")
+                     help=tr("print the autocompletion script for your shell"))
+    cli.add_argument("--lang", choices=i18n.SUPPORTED, default=default_language(),
+                     help=tr("output language (default: DOMAININFO_LANG, else en)"))
 
-    audit = cli.add_argument_group("auditoría")
+    audit = cli.add_argument_group(tr("audit"))
     audit.add_argument("-m", "--mode", choices=MODES, default="quick",
-                       help="quick: DNS y registro · web: HTTP, cabeceras y TLS · ports: puertos TCP · "
-                            "full: todo · mikrotik: RouterOS (por defecto: %(default)s)")
-    audit.add_argument("-f", "--file", type=Path, metavar="ARCHIVO",
-                       help="archivo UTF-8 con un objetivo por línea (# para comentarios)")
-    audit.add_argument("-s", "--skip", choices=MODULES, action="append", default=[], metavar="MÓDULO",
-                       help="omite un módulo; se puede repetir: " + ", ".join(MODULES))
+                       help=tr("quick: DNS and registration · web: HTTP, headers and TLS · ports: TCP ports · "
+                               "full: everything · mikrotik: RouterOS · webapp: one specific URL · session: "
+                               "authenticated session audit · apispec: documented API · zap: OWASP ZAP passive "
+                               "alerts · browser: page rendered with JavaScript · code: local project with code "
+                               "analyzers (default: %(default)s)"))
+    audit.add_argument("--url", metavar="URL",
+                       help=tr("webapp: full URL to audit; port, path and parameters are kept"))
+    audit.add_argument("-f", "--file", type=Path, metavar=tr("FILE"),
+                       help=tr("UTF-8 file with one target per line (# for comments)"))
+    audit.add_argument("-s", "--skip", choices=MODULES, action="append", default=[], metavar=tr("MODULE"),
+                       help=tr("skip a module; can be repeated: {modules}", modules=", ".join(MODULES)))
     audit.add_argument("--brute", action="store_true",
-                       help="subdominios: además de los certificados, probar la lista de palabras")
+                       help=tr("subdomains: besides certificates, also try the word list"))
     audit.add_argument("--no-tls-versions", action="store_true",
-                       help="TLS: no comprobar qué versiones acepta el servidor (más rápido)")
-    audit.add_argument("--watch", type=bounded_int(5, 86400), metavar="SEGUNDOS",
-                       help="repite la revisión cada N segundos y avisa solo de los cambios (CTRL+C para salir)")
+                       help=tr("TLS: do not check which versions the server accepts (faster)"))
+    audit.add_argument("--watch", type=bounded_int(5, 86400), metavar=tr("SECONDS"),
+                       help=tr("repeat the review every N seconds and report only changes (CTRL+C to quit)"))
 
-    network = cli.add_argument_group("red")
+    network = cli.add_argument_group(tr("network"))
     network.add_argument("-t", "--threads", type=bounded_int(1, 64), default=15, metavar="N",
-                         help="conexiones TCP simultáneas, 1-64 (por defecto: %(default)s)")
+                         help=tr("simultaneous TCP connections, 1-64 (default: %(default)s)"))
     network.add_argument("--resolver", metavar="IP",
-                         help="servidor DNS para MX/TXT/NS (por defecto el del sistema; si no responde, DNS sobre HTTPS)")
-    network.add_argument("--timeout", type=timeout_value, default=5.0, metavar="SEG",
-                         help="espera máxima por conexión, 0.1-60 s (por defecto: %(default)s)")
-    network.add_argument("--ports", type=port_list, metavar="LISTA",
-                         help="puertos TCP separados por comas, p. ej. 22,80,443 (por defecto según el modo)")
+                         help=tr("DNS server for MX/TXT/NS (default: the system's; if it does not answer, DNS over HTTPS)"))
+    network.add_argument("--timeout", type=timeout_value, default=5.0, metavar=tr("SEC"),
+                         help=tr("maximum wait per connection, 0.1-60 s (default: %(default)s)"))
+    network.add_argument("--ports", type=port_list, metavar=tr("LIST"),
+                         help=tr("comma-separated TCP ports, e.g. 22,80,443 (default depends on the mode)"))
     network.add_argument("--scheme", choices=("http", "https"), default="https",
-                         help="protocolo para el modo web (por defecto: %(default)s)")
-    network.add_argument("--web-port", type=bounded_int(1, 65535), metavar="PUERTO",
-                         help="puerto del servidor web (por defecto 443 o 80)")
+                         help=tr("protocol for the web mode (default: %(default)s)"))
+    network.add_argument("--web-port", type=bounded_int(1, 65535), metavar=tr("PORT"),
+                         help=tr("web server port (default 443 or 80)"))
+
+    scope = cli.add_argument_group(tr("scope and safety (webapp)"))
+    scope.add_argument("--scope", type=host_list, action="extend", default=[], metavar="HOSTS",
+                       help=tr("extra hosts authorized for following redirects, e.g. auth.example.com,*.cdn.example.com"))
+    scope.add_argument("--allow-private", action="store_true",
+                       help=tr("allow a public target to redirect or resolve to internal networks (only if authorized)"))
+    scope.add_argument("--insecure-tls", action="store_true",
+                       help=tr("read the page even if its certificate is not valid (noted in the report)"))
+
+    web = cli.add_argument_group(tr("sessions, APIs and web integrations"))
+    web.add_argument("--auth-file", type=Path, metavar=tr("FILE"),
+                     help=tr("session mode: authorization file with targets, test accounts (environment "
+                             "variable names) and limits; see docs/AUTHENTICATED_AUDIT.md"))
+    web.add_argument("--zap-url", metavar="URL",
+                     help=tr("zap mode: API of the OWASP ZAP you run on this computer (loopback only)"))
+    web.add_argument("--zap-api-key", metavar=tr("KEY"), help=tr("zap mode: API key (or ZAP_API_KEY)"))
+    web.add_argument("--zap-wait", type=bounded_int(5, 900), metavar=tr("SECONDS"),
+                     help=tr("zap mode: maximum wait for the passive scan"))
+    web.add_argument("--zap-spider", action="store_true",
+                     help=tr("zap mode: also crawl the site with the ZAP spider (still no active scan)"))
+    web.add_argument("--zap-spider-max", type=bounded_int(1, 500), metavar="N",
+                     help=tr("zap mode: maximum pages for the spider"))
+    web.add_argument("--browser-timeout", type=bounded_int(5, 120), metavar=tr("SECONDS"),
+                     help=tr("browser mode: page load timeout"))
+
+    external = cli.add_argument_group(tr("external tools and vulnerability intelligence"))
+    external.add_argument("--tool", action="extend", type=tool_list, default=[], metavar=tr("TOOLS"),
+                          help=tr("run optional tools, e.g. nmap,nuclei,whatweb (see --tools)"))
+    external.add_argument("--active", action="store_true",
+                          help=tr("allow tools that send probes (nmap, nuclei, sslyze, testssl.sh…); the target "
+                                  "must also be listed in --scope"))
+    external.add_argument("--tool-timeout", type=bounded_int(5, 3600), metavar=tr("SECONDS"),
+                          help=tr("maximum time per external tool"))
+    external.add_argument("--intel", action="store_true",
+                          help=tr("look up known vulnerabilities (OSV, NVD, CISA KEV) for the versions found"))
+    external.add_argument("--tools", action="store_true",
+                          help=tr("show which optional tools are installed and how to install the rest"))
+
+    center = cli.add_argument_group(tr("Security Center, history and exports"))
+    center.add_argument("--store", metavar=tr("PROJECT"),
+                        help=tr("also save the results in the Security Center database under this project"))
+    center.add_argument("--db", type=Path, metavar=tr("FILE"), help=tr("Security Center database (default: user data folder)"))
+    center.add_argument("--history", metavar=tr("TARGET"), help=tr("list saved audits of a target (with --project)"))
+    center.add_argument("--compare", nargs=2, type=int, metavar=("A", "B"),
+                        help=tr("compare two saved audits by id (only meaningful if their coverage is comparable)"))
+    center.add_argument("--export", choices=("csv", "pdf", "technical-pdf"),
+                        help=tr("export a project's findings: CSV, executive PDF or technical PDF"))
+    center.add_argument("--project", metavar=tr("PROJECT"), help=tr("project for --history and --export"))
+    center.add_argument("--serve", action="store_true", help=tr("open the DomainInfo Security Center (local web dashboard)"))
+    center.add_argument("--host", default="127.0.0.1", help=tr("Security Center address (default: %(default)s)"))
+    center.add_argument("--port", type=bounded_int(1, 65535), default=8765, help=tr("Security Center port (default: %(default)s)"))
+    center.add_argument("--no-browser", action="store_true", help=tr("do not open the browser automatically"))
+    center.add_argument("--allow-remote", action="store_true",
+                        help=tr("let the Security Center listen on a non-loopback address (use an HTTPS tunnel)"))
 
     router = cli.add_argument_group("mikrotik")
-    router.add_argument("--routeros-version", metavar="VERSIÓN",
-                        help="versión RouterOS declarada, por ejemplo 7.25")
-    router.add_argument("--ssh-port", type=bounded_int(1, 65535), default=22, metavar="PUERTO",
-                        help="puerto SSH para leer el banner, sin autenticación (por defecto: %(default)s)")
+    router.add_argument("--routeros-version", metavar=tr("VERSION"),
+                        help=tr("declared RouterOS version, for example 7.25"))
+    router.add_argument("--ssh-port", type=bounded_int(1, 65535), default=22, metavar=tr("PORT"),
+                        help=tr("SSH port to read the banner, without authentication (default: %(default)s)"))
     router.add_argument("--offline", action="store_true",
-                        help="evalúa la versión sin conectar con ningún equipo")
+                        help=tr("evaluate the version without connecting to any device"))
 
-    output = cli.add_argument_group("salida")
+    output = cli.add_argument_group(tr("output"))
     output.add_argument("--json", action="store_true",
-                        help="imprime JSON aunque estés en una terminal")
-    output.add_argument("--pretty", action="store_true", help="JSON con sangría, más fácil de leer")
+                        help=tr("print JSON even at a terminal"))
+    output.add_argument("--pretty", action="store_true", help=tr("indented JSON, easier to read"))
     output.add_argument("-q", "--quiet", action="store_true",
-                        help="solo JSON en stdout, sin progreso")
-    output.add_argument("-o", "--output", type=Path, default=Path("logs"), metavar="CARPETA",
-                        help="carpeta de reportes (por defecto: %(default)s)")
+                        help=tr("JSON only on stdout, no progress"))
+    output.add_argument("-o", "--output", type=Path, default=Path("logs"), metavar=tr("FOLDER"),
+                        help=tr("reports folder (default: %(default)s)"))
     output.add_argument("--format", choices=("json", "txt", "html", "md", "all"), default="all",
-                        help="formatos de reporte que se guardan (por defecto: %(default)s)")
-    output.add_argument("--open", action="store_true", help="abre el reporte HTML al terminar")
+                        help=tr("report formats to save (default: %(default)s)"))
+    output.add_argument("--open", action="store_true", help=tr("open the HTML report when finished"))
     output.add_argument("-v", "--verbose", action="store_true",
-                        help="muestra las rutas de los reportes en stderr")
+                        help=tr("show report paths on stderr"))
     output.add_argument("-j", action="store_true", help=argparse.SUPPRESS)  # old flag: same as --json
     return cli
 
@@ -528,14 +802,17 @@ def latest_release(timeout=5):
 def self_update():
     here = Path(__file__).resolve().parent
     latest = latest_release()
-    print(f"Instalada: v{VERSION}" + (f" · última publicada: {latest}" if latest else ""))
+    if latest:
+        print(tr("Installed: v{version} · latest published: {latest}", version=VERSION, latest=latest))
+    else:
+        print(tr("Installed: v{version}", version=VERSION))
     if (here / ".git").exists() and shutil.which("git"):
         result = subprocess.run(["git", "-C", str(here), "pull", "--ff-only"], check=False)
         if result.returncode:
-            print("No se pudo actualizar con git. Revisa si tienes cambios locales en " + str(here),
+            print(tr("Could not update with git. Check whether you have local changes in {path}", path=here),
                   file=sys.stderr)
         return result.returncode
-    print("Esta copia no es un repositorio git. Actualiza con el método que usaste al instalar:")
+    print(tr("This copy is not a git repository. Update with the method you used to install it:"))
     print("  pipx upgrade domaininfo")
     print(f"  pip install --upgrade git+https://github.com/{REPO}")
     return 0
@@ -548,7 +825,7 @@ def open_html(paths):
             try:
                 webbrowser.open(Path(path).resolve().as_uri())
             except (OSError, webbrowser.Error):
-                print("No se pudo abrir el navegador: " + path, file=sys.stderr)
+                print(tr("Could not open the browser: {path}", path=path), file=sys.stderr)
             return
 
 
@@ -583,26 +860,31 @@ def fingerprint(report):
             facts["tech.list"] = ", ".join(t["name"] for t in data.get("technologies", []))
         elif name == "lookalike":
             facts["lookalike.registered"] = ", ".join(r["domain"] for r in data.get("registered", []))
+        elif name == "webapp":
+            facts["webapp.status"] = data.get("status")
+            facts["webapp.findings"] = ", ".join(sorted({f["title"] for f in data.get("findings", [])
+                                                         if f.get("status") in ("confirmed", "likely")}))
     if isinstance(report.get("score"), dict):
         facts["score.grade"] = report["score"].get("grade")
     return facts
 
 
-FACT_LABELS = {"dns.addresses": "Direcciones", "http.status": "Estado HTTP",
-               "http.missing_headers": "Cabeceras ausentes", "tls.expires": "Caducidad del certificado",
-               "tls.serial": "Número de serie del certificado", "tls.protocol": "Protocolo TLS",
-               "ports.open": "Puertos abiertos", "mikrotik.version": "Versión RouterOS",
-               "mail.grade": "Nota del correo", "mail.dmarc": "Política DMARC",
-               "subdomains.alive": "Subdominios activos", "subdomains.takeover": "Subdominios con posible toma",
-               "tech.list": "Tecnologías", "lookalike.registered": "Dominios parecidos registrados",
-               "score.grade": "Nota de seguridad"}
+FACT_LABELS = {"dns.addresses": "Addresses", "http.status": "HTTP status",
+               "http.missing_headers": "Missing headers", "tls.expires": "Certificate expiry",
+               "tls.serial": "Certificate serial number", "tls.protocol": "TLS protocol",
+               "ports.open": "Open ports", "mikrotik.version": "RouterOS version",
+               "mail.grade": "Mail grade", "mail.dmarc": "DMARC policy",
+               "subdomains.alive": "Active subdomains", "subdomains.takeover": "Subdomains open to takeover",
+               "tech.list": "Technologies", "lookalike.registered": "Registered lookalike domains",
+               "score.grade": "Security grade", "webapp.status": "HTTP status of the URL",
+               "webapp.findings": "Confirmed or likely web findings"}
 
 
 def describe_changes(before, after):
     changes = []
     for key in sorted(set(before) | set(after)):
         if before.get(key) != after.get(key):
-            label = FACT_LABELS.get(key) or ("Módulo " + key.split(".")[0])
+            label = tr(FACT_LABELS[key]) if key in FACT_LABELS else tr("Module {name}", name=key.split(".")[0])
             changes.append(f"{label}: {before.get(key) or '—'} → {after.get(key) or '—'}")
     return changes
 
@@ -620,11 +902,11 @@ def run_targets(targets, args, view):
         try:
             paths = save_report(report, args.output, formats)
         except OSError as exc:
-            print(f"No se pudo guardar reporte: {exc}", file=sys.stderr)
+            print(tr("Could not save the report: {error}", error=exc), file=sys.stderr)
             failed = True
             paths = []
         if args.verbose:
-            print("Reportes: " + ", ".join(paths), file=sys.stderr)
+            print(tr("Reports: {paths}", paths=", ".join(paths)), file=sys.stderr)
         if view:
             view.report(report, paths)
         else:
@@ -636,14 +918,14 @@ def run_targets(targets, args, view):
     if len(reports) > 1:
         try:
             result, paths = save_batch(reports, args.output)
-            message = (f"Lote: {len(result['groups'])} elementos compartidos entre objetivos · "
-                       + ", ".join(paths))
+            message = tr("Batch: {count} items shared between targets · {paths}",
+                         count=len(result["groups"]), paths=", ".join(paths))
             if view:
                 view.note(message)
             elif args.verbose:
                 print(message, file=sys.stderr)
         except OSError as exc:
-            print(f"No se pudo guardar el resumen del lote: {exc}", file=sys.stderr)
+            print(tr("Could not save the batch summary: {error}", error=exc), file=sys.stderr)
     return failed, reports
 
 
@@ -652,7 +934,8 @@ def watch(targets, args, view):
     _, reports = run_targets(targets, args, view)
     known = {report["meta"]["target"]: fingerprint(report) for report in reports}
     if view:
-        view.note(f"Vigilando {len(targets)} objetivo(s) cada {args.watch} s. CTRL+C para salir.")
+        view.note(tr("Watching {count} target(s) every {seconds} s. CTRL+C to quit.",
+                     count=len(targets), seconds=args.watch))
     saved_open, args.open = args.open, False
     try:
         while True:
@@ -665,13 +948,13 @@ def watch(targets, args, view):
                 stamp = datetime.now().strftime("%H:%M:%S")
                 if not changes:
                     if view:
-                        view.quiet_tick(f"[{stamp}] {target}: sin cambios")
+                        view.quiet_tick(tr("[{time}] {target}: no changes", time=stamp, target=target))
                     continue
                 formats = ("json", "txt", "html") if args.format == "all" else (args.format,)
                 try:
                     save_report(report, args.output, formats)
                 except OSError as exc:
-                    print(f"No se pudo guardar reporte: {exc}", file=sys.stderr)
+                    print(tr("Could not save the report: {error}", error=exc), file=sys.stderr)
                 if view:
                     view.changes(stamp, target, changes)
                 else:
@@ -680,23 +963,129 @@ def watch(targets, args, view):
                                      ensure_ascii=False, indent=2 if args.pretty else None), flush=True)
     except KeyboardInterrupt:
         if view:
-            view.note("Vigilancia detenida.")
+            view.note(tr("Watch stopped."))
         return 0
     finally:
         args.open = saved_open
 
 
+def show_tools(args):
+    """Optional tools: installed or not, version, compatibility and how to install them."""
+    import tools
+    data = tools.detect_all()
+    if args.json or args.quiet or not sys.stdout.isatty():
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+        return 0
+    print(tr("Optional tools (DomainInfo works without them; nothing is downloaded automatically)"))
+    for name, info in data.items():
+        if info.get("available"):
+            state = tr("installed {version}", version=info.get("version") or "?")
+            if info.get("compatible") is False:
+                state += " · " + tr("needs {minimum} or newer", minimum=info.get("minimum"))
+        else:
+            state = tr("not installed")
+        print(f"  {name:<11} {info.get('category', ''):<7} {state}")
+        if not info.get("available") or info.get("compatible") is False:
+            print("              " + tr("install: {hint}", hint=info.get("install")))
+    return 0
+
+
+def serve_center(args):
+    import server
+    try:
+        return server.serve(host=args.host, port=args.port, open_browser=not args.no_browser,
+                            allow_remote=args.allow_remote, db_path=str(args.db) if args.db else None)
+    except server.MissingExtra as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+
+def store_project(store, name, create=False):
+    for project in store.list_projects():
+        if project["name"].lower() == " ".join(str(name).split()).lower():
+            return project
+    if create:
+        return store.create_project(name)
+    raise KeyError(tr("Unknown project: {name}", name=name))
+
+
+def store_reports(reports, args):
+    """--store: save the reports in the Security Center database; each target joins the project scope."""
+    import auditstore
+    with auditstore.AuditStore(str(args.db) if args.db else None) as store:
+        project = store_project(store, args.store, create=True)
+        ids = []
+        for report in reports:
+            target = report["meta"]["target"]
+            entry = store.in_scope(project["id"], target)
+            if entry is None and args.mode not in PATH_MODES:
+                entry = store.add_target(project["id"], target)
+            ids.append(store.save_audit(project["id"], report, entry["id"] if entry else None)["id"])
+        return ids
+
+
+def store_command(args, cli):
+    """--history, --compare and --export over the Security Center database."""
+    import auditstore
+    with auditstore.AuditStore(str(args.db) if args.db else None) as store:
+        try:
+            if args.compare:
+                result = store.compare(*args.compare)
+                print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+                return 0
+            if not args.project:
+                cli.error(tr("--history and --export need --project"))
+            project = store_project(store, args.project)
+            if args.history:
+                rows = store.target_history(project["id"], args.history)
+                print(json.dumps(rows, ensure_ascii=False, indent=2, default=str))
+                return 0
+            import exporters
+            data = store.report_bundle(project["id"])
+            if args.export == "csv":
+                content, suffix = exporters.findings_csv(data["findings"]).encode("utf-8-sig"), ".csv"
+            else:
+                build = exporters.executive_pdf if args.export == "pdf" else exporters.technical_pdf
+                content = build(data)
+                suffix = ("_executive" if args.export == "pdf" else "_technical") + ".pdf"
+            args.output.mkdir(parents=True, exist_ok=True)
+            name = re.sub(r"[^a-zA-Z0-9._-]", "_", project["name"])
+            path = args.output / f"domaininfo_{name}_{datetime.now(timezone.utc):%Y%m%d_%H%M%S}{suffix}"
+            path.write_bytes(content)
+            print(str(path))
+            return 0
+        except (KeyError, ValueError) as exc:
+            print(str(exc).strip("'\""), file=sys.stderr)
+            return 1
+
+
+def requested_language(argv):
+    """``--lang`` value from the raw arguments, read before the parser so --help is translated too."""
+    for index, item in enumerate(argv):
+        if item == "--lang" and index + 1 < len(argv):
+            return argv[index + 1]
+        if item.startswith("--lang="):
+            return item.split("=", 1)[1]
+    return None
+
+
 def main(argv=None):
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    argv = sys.argv[1:] if argv is None else list(argv)
+    i18n.set_language(requested_language(argv) or default_language())
     cli = parser()
     args = cli.parse_args(argv)
+    i18n.set_language(args.lang)
     if args.resolver:
         try:
             os.environ["DOMAININFO_RESOLVER"] = ",".join(str(ipaddress.ip_address(item.strip()))
                                                          for item in args.resolver.split(","))
         except ValueError:
-            cli.error("--resolver debe ser una o varias IP separadas por comas")
+            cli.error(tr("--resolver must be one or more comma-separated IP addresses"))
     if args.completion:
         from completions import script
         print(script(args.completion, cli))
@@ -706,21 +1095,44 @@ def main(argv=None):
     if args.doctor:
         print(json.dumps(doctor(), ensure_ascii=False, indent=2))
         return 0
+    if args.tools:
+        return show_tools(args)
+    if args.serve:
+        return serve_center(args)
+    if args.compare or args.history or args.export:
+        return store_command(args, cli)
+    if args.active and not args.tool:
+        cli.error(tr("--active only applies together with --tool"))
+    if args.mode == "session":
+        if not args.auth_file:
+            cli.error(tr("-m session needs --auth-file (see docs/AUTHENTICATED_AUDIT.md)"))
+        if not args.target and not args.url and not args.file:
+            import authscope
+            try:
+                args.target = authscope.load(str(args.auth_file)).login_url
+            except (OSError, ValueError) as exc:
+                cli.error(str(exc))
     if args.routeros_version or args.offline:
         if args.mode != "mikrotik":
-            cli.error("--routeros-version y --offline requieren -m mikrotik")
+            cli.error(tr("--routeros-version and --offline require -m mikrotik"))
         if args.offline and (not args.routeros_version or args.target or args.file):
-            cli.error("--offline requiere --routeros-version y no acepta objetivos/archivos")
+            cli.error(tr("--offline requires --routeros-version and does not accept targets/files"))
         if args.routeros_version:
             import routeros
             try:
                 args.routeros_version = routeros.parse_version(args.routeros_version).text
             except ValueError as exc:
                 cli.error(str(exc))
+    if args.url:
+        if args.mode not in URL_MODES:
+            cli.error(tr("--url requires a URL mode: {modes}", modes=", ".join(sorted(URL_MODES))))
+        if args.target or args.file:
+            cli.error(tr("Use --url, a target or --file, not several at once"))
+        args.target = args.url
     if args.target and args.file:
-        cli.error("Usa un objetivo o --file, no ambos")
+        cli.error(tr("Use a target or --file, not both"))
     if args.interactive and (args.target or args.file or args.offline):
-        cli.error("--interactive no acepta objetivo, --file ni --offline; elige dentro del menú")
+        cli.error(tr("--interactive does not accept a target, --file or --offline; choose inside the menu"))
     if args.interactive or (not args.target and not args.file and not args.offline and sys.stdin.isatty()):
         from terminal_ui import InteractiveApp
         return InteractiveApp(sys.modules[__name__], args).run()
@@ -735,21 +1147,21 @@ def main(argv=None):
     elif args.target:
         raw_targets = [args.target]
     else:
-        cli.error("Indica un objetivo, --file o --doctor")
+        cli.error(tr("Give a target, --file or --doctor"))
     targets = []
     invalid = False
     for raw in raw_targets:
         if not raw.strip() or raw.lstrip().startswith("#"):
             continue
         try:
-            target = normalize_target(raw)
+            target = normalize_for_mode(raw, args.mode)
             if target not in targets:
                 targets.append(target)
         except (ValueError, UnicodeError) as exc:
-            print(f"Objetivo inválido {raw!r}: {exc}", file=sys.stderr)
+            print(tr("Invalid target {target}: {error}", target=repr(raw), error=exc), file=sys.stderr)
             invalid = True
     if not targets:
-        cli.error("No hay objetivos válidos")
+        cli.error(tr("No valid targets"))
     # Readable view only for a person at a terminal; pipes, files, --json and -q keep JSON.
     args.human = not (args.json or args.j or args.quiet or args.pretty) and sys.stdout.isatty()
     view = None
@@ -758,7 +1170,19 @@ def main(argv=None):
         view = CliView(sys.modules[__name__], args)
     if args.watch:
         return watch(targets, args, view)
-    failed, _ = run_targets(targets, args, view)
+    failed, reports = run_targets(targets, args, view)
+    if args.store:
+        try:
+            ids = store_reports(reports, args)
+            message = tr("Saved in the Security Center (project {project}): audits {ids}",
+                         project=args.store, ids=", ".join(map(str, ids)))
+            if view:
+                view.note(message)
+            elif args.verbose:
+                print(message, file=sys.stderr)
+        except (OSError, ValueError, KeyError) as exc:
+            print(tr("Could not save in the Security Center: {error}", error=exc), file=sys.stderr)
+            failed = True
     return 1 if failed or invalid else 0
 
 
@@ -767,7 +1191,7 @@ def entry():
     try:
         sys.exit(main())
     except (KeyboardInterrupt, EOFError):
-        print("Interrumpido", file=sys.stderr)
+        print(tr("Interrupted"), file=sys.stderr)
         sys.exit(130)
 
 

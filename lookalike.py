@@ -1,11 +1,15 @@
-"""Dominios parecidos (typosquatting): genera variantes del nombre y comprueba cuáles
-existen. Sirve para proteger una marca contra phishing y suplantación.
+"""Lookalike domains (typosquatting): generates variants of the name and checks which ones
+exist. Helps protect a brand against phishing and impersonation.
+
+Variant ``kind`` values (JSON, always English): omission, repetition, transposition,
+adjacent key, insertion, homoglyph, bit flip, hyphenation, vowel swap, added word, other TLD.
 """
 
 from concurrent.futures import ThreadPoolExecutor
 import socket
 
 import dnsclient
+from i18n import tr
 
 KEYBOARD = {"q": "wa", "w": "qes", "e": "wrd", "r": "etf", "t": "ryg", "y": "tuh", "u": "yij", "i": "uok",
             "o": "ipl", "p": "ol", "a": "qsz", "s": "awdz", "d": "sefx", "f": "drgc", "g": "fthv",
@@ -34,7 +38,7 @@ def _valid(label):
 
 
 def generate(domain, limit=600):
-    """Lista de (dominio, tipo) sin duplicados ni el original."""
+    """List of (domain, kind) without duplicates or the original."""
     name, tld = split(domain)
     seen, out = {domain}, []
 
@@ -44,32 +48,33 @@ def generate(domain, limit=600):
             seen.add(candidate)
             out.append((candidate, kind))
     for i in range(len(name)):
-        add(name[:i] + name[i + 1:], "omisión")
-        add(name[:i] + name[i] + name[i:], "repetición")
+        add(name[:i] + name[i + 1:], "omission")
+        add(name[:i] + name[i] + name[i:], "repetition")
         if i < len(name) - 1:
-            add(name[:i] + name[i + 1] + name[i] + name[i + 2:], "transposición")
+            add(name[:i] + name[i + 1] + name[i] + name[i + 2:], "transposition")
         for near in KEYBOARD.get(name[i], ""):
-            add(name[:i] + near + name[i + 1:], "tecla vecina")
-            add(name[:i] + near + name[i:], "inserción")
+            add(name[:i] + near + name[i + 1:], "adjacent key")
+            add(name[:i] + near + name[i:], "insertion")
         for glyph in HOMOGLYPHS.get(name[i], ()):
-            add(name[:i] + glyph + name[i + 1:], "homoglifo")
+            add(name[:i] + glyph + name[i + 1:], "homoglyph")
         for bit in range(8):
             flipped = chr(ord(name[i]) ^ (1 << bit))
             if flipped.isalnum() and flipped.isascii():
-                add(name[:i] + flipped.lower() + name[i + 1:], "bit cambiado")
+                add(name[:i] + flipped.lower() + name[i + 1:], "bit flip")
         if 0 < i < len(name):
-            add(name[:i] + "-" + name[i:], "guion")
+            add(name[:i] + "-" + name[i:], "hyphenation")
     for vowel_from in "aeiou":
         if vowel_from in name:
             for vowel_to in "aeiou":
                 if vowel_to != vowel_from:
-                    add(name.replace(vowel_from, vowel_to, 1), "vocal cambiada")
+                    add(name.replace(vowel_from, vowel_to, 1), "vowel swap")
+    # Spanish words stay on purpose: phishers target Spanish-speaking brands too.
     for extra in ("login", "secure", "app", "online", "soporte", "pago", "cuenta", "verify", "my", "web"):
-        add(f"{name}-{extra}", "palabra añadida")
-        add(f"{extra}{name}", "palabra añadida")
+        add(f"{name}-{extra}", "added word")
+        add(f"{extra}{name}", "added word")
     for other in TLDS:
         if other != tld:
-            add(name, "otro dominio superior", other)
+            add(name, "other TLD", other)
     return out[:limit]
 
 
@@ -100,4 +105,4 @@ def audit(domain, threads, timeout, limit=600):
     rows.sort(key=lambda r: (not r["mx"], r["domain"]))
     return {"checked": len(candidates), "registered": rows,
             "with_mail": sum(1 for r in rows if r["mx"]),
-            "note": "Que exista no significa que sea malicioso; revisa los que reciben correo o imitan tu web"}
+            "note": tr("Existing does not mean malicious; review the ones that receive mail or copy your site")}

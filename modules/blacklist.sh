@@ -20,10 +20,10 @@ warn()    { echo -e "  ${Y}[!]${NC} $1"; }
 info()    { echo -e "  ${DIM}ℹ  $1${NC}"; }
 
 module_blacklist() {
-    header "6 ▸ REPUTACIÓN — LISTAS NEGRAS (DNSBL)"
-    [[ -z "$IP" ]] && { warn "Sin IP para verificar"; return; }
+    header "6 ▸ REPUTATION — BLACKLISTS (DNSBL)"
+    [[ -z "$IP" ]] && { warn "No IP to check"; return; }
 
-    section "Comprobando 12 listas negras"
+    section "Checking 12 blacklists"
     local rev_ip
     rev_ip=$(echo "$IP" | awk -F'.' '{print $4"."$3"."$2"."$1}')
 
@@ -47,21 +47,21 @@ module_blacklist() {
         local result
         result=$(dig +short +time=3 +tries=1 "${rev_ip}.${bl}" 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
         if [[ -n "$result" ]]; then
-            kv_r "✗ LISTADO en $bl" "$result"
+            kv_r "✗ LISTED on $bl" "$result"
             ((LISTED++))
         else
-            ok "Limpio en $bl"
+            ok "Clean on $bl"
         fi
     done
 
     echo ""
     if [[ $LISTED -eq 0 ]]; then
-        ok "IP no listada en ninguna lista negra verificada ✓"
+        ok "IP not listed on any of the checked blacklists ✓"
     else
-        kv_r "⚠ Total listas negras" "$LISTED encontradas"
+        kv_r "⚠ Total blacklists" "$LISTED found"
     fi
 }
 
 # ════════════════════════════════════════════════════════════════════
-# MÓDULO: SUBDOMINIOS
+# MODULE: SUBDOMAINS
 # ════════════════════════════════════════════════════════════════════
